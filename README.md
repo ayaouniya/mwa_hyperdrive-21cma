@@ -20,6 +20,13 @@ See the instructions
 A comprehensive guide for usage can be found
 [here](https://MWATelescope.github.io/mwa_hyperdrive/user/intro.html).
 
+## Fork-specific Notes
+
+This fork also contains an explicit 21CMA processing route.
+
+See [docs/21cma/README.md](docs/21cma/README.md) for the route summary and
+usage notes.
+
 ## Troubleshooting
 
 Run `hyperdrive` again, but this time with the debug build:
