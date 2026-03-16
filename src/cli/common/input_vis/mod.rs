@@ -30,8 +30,9 @@ use vec1::Vec1;
 use super::{InfoPrinter, ARRAY_POSITION_HELP};
 use crate::{
     averaging::{
-        channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
-        timesteps_to_timeblocks, AverageFactorError,
+        channels_to_chanblocks, chunked_selected_timesteps_to_timeblocks,
+        parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks,
+        AverageFactorError,
     },
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
@@ -929,12 +930,23 @@ impl InputVisArgs {
         time_printer.push_line(format!("DUT1: {:.10} s", dut1.to_seconds()).into());
         time_printer.display();
 
-        let timeblocks = timesteps_to_timeblocks(
-            &obs_context.timestamps,
-            time_res,
-            time_average_factor,
-            Some(&timesteps_to_use),
-        );
+        let timeblocks = match processing_telescope {
+            Telescope::Standard => timesteps_to_timeblocks(
+                &obs_context.timestamps,
+                time_res,
+                time_average_factor,
+                Some(&timesteps_to_use),
+            ),
+            Telescope::Cma21 => {
+                let timestamps_to_use =
+                    timesteps_to_use.mapped_ref(|&timestep| obs_context.timestamps[timestep]);
+                chunked_selected_timesteps_to_timeblocks(
+                    &timestamps_to_use,
+                    &timesteps_to_use,
+                    time_average_factor,
+                )
+            }
+        };
 
         // Set up frequency information. Determine all of the fine-channel flags.
         let mut flagged_fine_chans: HashSet<u16> = match fine_chan_flags {

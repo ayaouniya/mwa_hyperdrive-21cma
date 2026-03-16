@@ -198,6 +198,48 @@ fn test_chunked_timestamps_to_timeblocks_preserves_irregular_centroids() {
 }
 
 #[test]
+fn test_chunked_selected_timesteps_to_timeblocks_preserves_real_indices() {
+    let timestamps = vec![0.0, 302.5, 605.0, 907.5, 1129.0, 1350.0]
+        .into_iter()
+        .map(Epoch::from_gpst_seconds)
+        .collect::<Vec<_>>();
+    let timestamps = Vec1::try_from_vec(timestamps).unwrap();
+    let timesteps = vec1![10, 11, 12, 13, 14, 15];
+
+    let no_average = chunked_selected_timesteps_to_timeblocks(
+        &timestamps,
+        &timesteps,
+        NonZeroUsize::new(1).unwrap(),
+    );
+    assert_eq!(no_average.len(), 6);
+    for (timeblock, (&timestamp, &timestep)) in no_average
+        .iter()
+        .zip(timestamps.iter().zip(timesteps.iter()))
+    {
+        assert_eq!(timeblock.range.len(), 1);
+        assert_eq!(timeblock.timesteps[0], timestep);
+        assert_abs_diff_eq!(
+            timeblock.timestamps[0].to_gpst_seconds(),
+            timestamp.to_gpst_seconds()
+        );
+        assert_abs_diff_eq!(
+            timeblock.median.to_gpst_seconds(),
+            timestamp.to_gpst_seconds()
+        );
+    }
+
+    let averaged = chunked_selected_timesteps_to_timeblocks(
+        &timestamps,
+        &timesteps,
+        NonZeroUsize::new(2).unwrap(),
+    );
+    assert_eq!(averaged.len(), 3);
+    assert_eq!(averaged[0].timesteps.as_slice(), &[10, 11]);
+    assert_eq!(averaged[1].timesteps.as_slice(), &[12, 13]);
+    assert_eq!(averaged[2].timesteps.as_slice(), &[14, 15]);
+}
+
+#[test]
 fn test_channels_to_chanblocks() {
     let all_channel_freqs = [12000.0];
     let freq_average_factor = NonZeroUsize::new(1).unwrap();

@@ -259,13 +259,16 @@ pub(super) fn timesteps_to_timeblocks(
 /// preserving the centroid of the actual timestamps in each block.
 ///
 /// Unlike [`timesteps_to_timeblocks`], this helper does not construct an ideal
-/// regular cadence and then map timestamps onto it. It is intended for explicit
-/// irregular-time output routes, where we want the output timeblock centroids
-/// to reflect the real timestamps that were selected.
-pub(crate) fn chunked_timestamps_to_timeblocks(
+/// regular cadence and then map timestamps onto it. It is intended for
+/// explicit irregular-time routes, where we want the selected timestamps to be
+/// grouped in-order without being snapped back onto an inferred cadence.
+pub(crate) fn chunked_selected_timesteps_to_timeblocks(
     timestamps: &Vec1<Epoch>,
+    timesteps: &Vec1<usize>,
     time_average_factor: NonZeroUsize,
 ) -> Vec1<Timeblock> {
+    assert_eq!(timestamps.len(), timesteps.len());
+
     let factor = time_average_factor.get();
     let mut timeblocks = Vec::with_capacity(timestamps.len().div_ceil(factor));
     let mut i_timeblock = 0;
@@ -275,7 +278,7 @@ pub(crate) fn chunked_timestamps_to_timeblocks(
         let timeblock_timestamps =
             Vec1::try_from_vec(timestamps.as_slice()[start..end].to_vec()).expect("not empty");
         let timeblock_timesteps =
-            Vec1::try_from_vec((start..end).collect::<Vec<_>>()).expect("not empty");
+            Vec1::try_from_vec(timesteps.as_slice()[start..end].to_vec()).expect("not empty");
         timeblocks.push(Timeblock {
             index: i_timeblock,
             range: start..end,
@@ -288,6 +291,17 @@ pub(crate) fn chunked_timestamps_to_timeblocks(
     }
 
     Vec1::try_from_vec(timeblocks).expect("cannot be empty")
+}
+
+/// Group already-selected timestamps into sequential timeblocks while
+/// preserving the centroid of the actual timestamps in each block.
+pub(crate) fn chunked_timestamps_to_timeblocks(
+    timestamps: &Vec1<Epoch>,
+    time_average_factor: NonZeroUsize,
+) -> Vec1<Timeblock> {
+    let timesteps =
+        Vec1::try_from_vec((0..timestamps.len()).collect::<Vec<_>>()).expect("not empty");
+    chunked_selected_timesteps_to_timeblocks(timestamps, &timesteps, time_average_factor)
 }
 
 /// Returns a vector of [`Spw`]s (potentially multiple contiguous-bands of fine
