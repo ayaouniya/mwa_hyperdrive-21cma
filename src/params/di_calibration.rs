@@ -17,7 +17,7 @@ use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     Jones,
 };
-use ndarray::{iter::AxisIterMut, prelude::*, ArcArray2};
+use ndarray::{prelude::*, ArcArray2};
 use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
 use vec1::Vec1;
@@ -294,9 +294,18 @@ impl DiCalParams {
             // Mutable slices of the "global" arrays. These allow threads to mutate
             // the global arrays in parallel (using the Arc<Mutex<_>> pattern would
             // kill performance here).
-            let vis_data_slices = vis_data.outer_iter_mut();
-            let vis_model_slices = vis_model.outer_iter_mut();
-            let vis_weight_slices = vis_weights.outer_iter_mut();
+            //
+            // Reader timeblocks may average several native timesteps into one
+            // visibility. Store that visibility at the start of the native range
+            // it represents so calibration timeblock ranges still address the
+            // correct part of the observation. The remaining native slots keep
+            // zero weight and therefore do not contribute to calibration.
+            let vis_data_slices =
+                timeblock_output_slices(&mut vis_data, &input_vis_params.timeblocks);
+            let vis_model_slices =
+                timeblock_output_slices(&mut vis_model, &input_vis_params.timeblocks);
+            let vis_weight_slices =
+                timeblock_output_slices(&mut vis_weights, &input_vis_params.timeblocks);
 
             // Input visibility-data reading thread.
             let data_handle: ScopedJoinHandle<Result<(), VisReadError>> = thread::Builder::new()
@@ -462,14 +471,36 @@ impl DiCalParams {
     }
 }
 
+fn timeblock_output_slices<'a, T>(
+    array: &'a mut Array3<T>,
+    timeblocks: &'a [Timeblock],
+) -> impl Iterator<Item = ArrayViewMut2<'a, T>> + 'a {
+    let mut output_indices = timeblocks
+        .iter()
+        .map(|timeblock| timeblock.range.start)
+        .peekable();
+
+    array
+        .outer_iter_mut()
+        .enumerate()
+        .filter_map(move |(index, slice)| {
+            if output_indices.peek().copied() == Some(index) {
+                output_indices.next();
+                Some(slice)
+            } else {
+                None
+            }
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
-fn model_thread(
+fn model_thread<'a>(
     beam: &dyn Beam,
     source_list: &SourceList,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
     model_autos: bool,
-    vis_model_slices: AxisIterMut<'_, Jones<f32>, Ix2>,
+    vis_model_slices: impl Iterator<Item = ArrayViewMut2<'a, Jones<f32>>>,
     tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
@@ -655,9 +686,12 @@ impl CalVis {
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
-    use ndarray::Array3;
+    use hifitime::Epoch;
+    use ndarray::{Array3, Axis};
+    use vec1::vec1;
 
-    use super::CalVis;
+    use super::{timeblock_output_slices, CalVis};
+    use crate::averaging::Timeblock;
     use crate::context::Polarisations;
     use marlu::Jones;
 
@@ -709,6 +743,41 @@ mod tests {
 
         assert_abs_diff_eq!(cal_vis.vis_data, expected_vis_data);
         assert_abs_diff_eq!(cal_vis.vis_model, expected_vis_model);
+    }
+
+    #[test]
+    fn reader_averaged_visibilities_keep_their_native_time_ranges() {
+        let epoch = Epoch::from_gpst_seconds(0.0);
+        let timeblocks = vec![
+            Timeblock {
+                index: 0,
+                range: 0..4,
+                timestamps: vec1![epoch],
+                timesteps: vec1![0],
+                median: epoch,
+            },
+            Timeblock {
+                index: 1,
+                range: 4..8,
+                timestamps: vec1![epoch],
+                timesteps: vec1![4],
+                median: epoch,
+            },
+        ];
+        let mut visibilities = Array3::<f32>::zeros((8, 1, 1));
+
+        for (value, mut slice) in (1..).zip(timeblock_output_slices(&mut visibilities, &timeblocks))
+        {
+            slice.fill(value as f32);
+        }
+
+        assert_eq!(
+            visibilities
+                .axis_iter(Axis(0))
+                .map(|slice| slice[(0, 0)])
+                .collect::<Vec<_>>(),
+            vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0]
+        );
     }
 }
 

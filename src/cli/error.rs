@@ -146,7 +146,10 @@ impl From<DiCalArgsError> for HyperdriveError {
             DiCalArgsError::ParseCalTimeAverageFactor(_)
             | DiCalArgsError::CalTimeFactorNotInteger
             | DiCalArgsError::CalTimeResNotMultiple { .. }
-            | DiCalArgsError::CalTimeFactorZero => Self::Averaging(e.to_string()),
+            | DiCalArgsError::CalTimeFactorZero
+            | DiCalArgsError::CalTimeblockSplitsReaderAveraging { .. } => {
+                Self::Averaging(e.to_string())
+            }
             DiCalArgsError::IO(e) => Self::from(e),
         }
     }

@@ -16,7 +16,7 @@ use ndarray::prelude::*;
 use serial_test::serial;
 use tempfile::{tempdir, TempDir};
 
-use super::{DiCalArgs, DiCalCliArgs};
+use super::{find_split_reader_timeblock, DiCalArgs, DiCalCliArgs};
 use crate::{
     cli::{
         common::{BeamArgs, InputVisArgs, SkyModelWithVetoArgs},
@@ -175,6 +175,36 @@ fn test_new_params_time_averaging_fail() {
     assert!(result.err().unwrap().to_string().contains(
         "Calibration time resolution isn't a multiple of input data's: 3 seconds vs 2 seconds"
     ));
+}
+
+#[test]
+fn test_reader_averaging_alignment_detection() {
+    use crate::averaging::Timeblock;
+    use hifitime::Epoch;
+    use vec1::vec1;
+
+    let epoch = Epoch::from_gpst_seconds(0.0);
+    let make_timeblock = |index, range: std::ops::Range<usize>| Timeblock {
+        index,
+        range,
+        timestamps: vec1![epoch],
+        timesteps: vec1![index],
+        median: epoch,
+    };
+    let reader = vec![make_timeblock(0, 0..4), make_timeblock(1, 4..8)];
+    let aligned = vec![make_timeblock(0, 0..8)];
+    let split = vec![
+        make_timeblock(0, 0..2),
+        make_timeblock(1, 2..4),
+        make_timeblock(2, 4..6),
+        make_timeblock(3, 6..8),
+    ];
+
+    assert!(find_split_reader_timeblock(&reader, &aligned).is_none());
+    assert_eq!(
+        find_split_reader_timeblock(&reader, &split).unwrap().range,
+        0..4
+    );
 }
 
 #[test]

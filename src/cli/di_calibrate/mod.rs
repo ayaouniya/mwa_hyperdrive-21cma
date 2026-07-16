@@ -25,7 +25,11 @@ use super::common::{
     SkyModelWithVetoArgs, Warn, ARG_FILE_HELP,
 };
 use crate::{
-    averaging::{parse_time_average_factor, timesteps_to_timeblocks, AverageFactorError},
+    averaging::{
+        chunked_timestamps_to_timeblocks, parse_time_average_factor, timesteps_to_timeblocks,
+        AverageFactorError,
+    },
+    context::Telescope,
     io::write::{can_write_to_file, VIS_OUTPUT_EXTENSIONS},
     params::{DiCalParams, ModellingParams},
     solutions::{self, CalSolutionType, CalibrationSolutions, CAL_SOLUTION_EXTENSIONS},
@@ -282,8 +286,11 @@ impl DiCalArgs {
         )?;
 
         // Set up the calibration timeblocks.
+        // Calibration intervals are defined on the native selected timestamps,
+        // even when the reader averages several of them into one visibility.
+        let native_time_res = obs_context.time_res.unwrap_or(input_vis_params.time_res);
         let time_average_factor = parse_time_average_factor(
-            Some(input_vis_params.time_res),
+            Some(native_time_res),
             timesteps_per_timeblock.as_deref(),
             NonZeroUsize::new(
                 input_vis_params.timeblocks.last().timesteps.last()
@@ -309,12 +316,26 @@ impl DiCalArgs {
                 .collect(),
         )
         .expect("cannot be empty");
-        let cal_timeblocks = timesteps_to_timeblocks(
-            &all_selected_timestamps,
-            input_vis_params.time_res,
-            time_average_factor,
-            None,
-        );
+        let cal_timeblocks = match input_vis_params.processing_telescope {
+            Telescope::Standard => timesteps_to_timeblocks(
+                &all_selected_timestamps,
+                native_time_res,
+                time_average_factor,
+                None,
+            ),
+            Telescope::Cma21 => {
+                chunked_timestamps_to_timeblocks(&all_selected_timestamps, time_average_factor)
+            }
+        };
+        if let Some(reader_timeblock) =
+            find_split_reader_timeblock(&input_vis_params.timeblocks, &cal_timeblocks)
+        {
+            return Err(DiCalArgsError::CalTimeblockSplitsReaderAveraging {
+                start: reader_timeblock.range.start,
+                end: reader_timeblock.range.end,
+            }
+            .into());
+        }
 
         let mut cal_printer = InfoPrinter::new("DI calibration set up".into());
         // I'm quite bored right now.
@@ -645,6 +666,17 @@ impl DiCalArgs {
     }
 }
 
+fn find_split_reader_timeblock<'a>(
+    reader_timeblocks: &'a [crate::averaging::Timeblock],
+    cal_timeblocks: &[crate::averaging::Timeblock],
+) -> Option<&'a crate::averaging::Timeblock> {
+    reader_timeblocks.iter().find(|reader| {
+        !cal_timeblocks
+            .iter()
+            .any(|cal| cal.range.start <= reader.range.start && reader.range.end <= cal.range.end)
+    })
+}
+
 /// Errors associated with DI calibration arguments.
 #[derive(thiserror::Error, Debug)]
 pub(super) enum DiCalArgsError {
@@ -670,6 +702,11 @@ pub(super) enum DiCalArgsError {
 
     #[error("Calibration time average factor cannot be 0")]
     CalTimeFactorZero,
+
+    #[error(
+        "Calibration timeblocks cannot split a reader-averaged visibility (native timestep range {start}..{end}); choose a calibration interval aligned with the reader averaging"
+    )]
+    CalTimeblockSplitsReaderAveraging { start: usize, end: usize },
 
     // #[error("Error when parsing freq. average factor: {0}")]
     // ParseCalFreqAverageFactor(crate::unit_parsing::UnitParseError),
