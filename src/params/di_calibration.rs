@@ -427,6 +427,7 @@ impl DiCalParams {
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             *write_smallest_contiguous_band,
                             input_vis_params.processing_telescope,
+                            obs_context.polarisations,
                             rx_model,
                             &error,
                             model_write_progress,

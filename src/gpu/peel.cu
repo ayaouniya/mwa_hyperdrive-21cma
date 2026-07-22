@@ -434,6 +434,7 @@ __global__ void reduce_freqs(
 /**
  * Kernel for ...
  */
+template <bool XX_ONLY>
 __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_weights, const JonesF32 *vis_model,
                                  JonesF32 *vis_model_rotated, const IonoConsts *iono_consts, JonesF64 *iono_fits,
                                  const int num_baselines, const int num_freqs, const UVW *uvws,
@@ -460,11 +461,11 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
         const int step = i_freq * num_baselines + i_bl;
         const double weight = (double)vis_weights[step];
         const JonesF32 *residual = vis_residual + step;
-        const double residual_i_re = (double)residual->j00_re + (double)residual->j11_re;
-        const double residual_i_im = (double)residual->j00_im + (double)residual->j11_im;
+        const double residual_i_re = XX_ONLY ? (double)residual->j00_re : (double)residual->j00_re + (double)residual->j11_re;
+        const double residual_i_im = XX_ONLY ? (double)residual->j00_im : (double)residual->j00_im + (double)residual->j11_im;
         const JonesF32 *model = vis_model_rotated + step;
-        const double model_i_re = (double)model->j00_re + (double)model->j11_re;
-        const double model_i_im = (double)model->j00_im + (double)model->j11_im;
+        const double model_i_re = XX_ONLY ? (double)model->j00_re : (double)model->j00_re + (double)model->j11_re;
+        const double model_i_im = XX_ONLY ? (double)model->j00_im : (double)model->j00_im + (double)model->j11_im;
 
         const double mr = model_i_re * (residual_i_im - model_i_im);
         const double mm = model_i_re * model_i_re;
@@ -659,7 +660,7 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
                                  IonoConsts *iono_consts,
                                  const int num_baselines, const int num_freqs, const int num_iterations,
                                  const UVW *d_uvws, const FLOAT *d_lambdas_m,
-                                 const FLOAT convergence)
+                                 const FLOAT convergence, const int xx_only)
 {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
@@ -683,9 +684,18 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     for (int iteration = 0; iteration < num_iterations; iteration++)
     {
         // Do the work for one loop of the iteration.
-        iono_loop_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_weights, d_vis_model, d_vis_model_rotated,
-                                                d_iono_consts, d_iono_fits, num_baselines, num_freqs, d_uvws,
-                                                d_lambdas_m);
+        if (xx_only)
+        {
+            iono_loop_kernel<true><<<gridDim, blockDim>>>(d_vis_residual, d_vis_weights, d_vis_model, d_vis_model_rotated,
+                                                          d_iono_consts, d_iono_fits, num_baselines, num_freqs, d_uvws,
+                                                          d_lambdas_m);
+        }
+        else
+        {
+            iono_loop_kernel<false><<<gridDim, blockDim>>>(d_vis_residual, d_vis_weights, d_vis_model, d_vis_model_rotated,
+                                                           d_iono_consts, d_iono_fits, num_baselines, num_freqs, d_uvws,
+                                                           d_lambdas_m);
+        }
 
 #ifdef DEBUG
         CHECK_GPU_ERROR(gpuDeviceSynchronize());

@@ -217,6 +217,7 @@ impl VisSimulateParams {
                             Some(&MwaObsContext::from_mwalib(metafits)),
                             *write_smallest_contiguous_band,
                             Telescope::Standard,
+                            Polarisations::XX_XY_YX_YY,
                             rx_model,
                             &error,
                             Some(write_progress),

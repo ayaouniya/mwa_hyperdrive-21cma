@@ -47,6 +47,7 @@ extern "C" {
         d_uvws: *const UVW,
         d_lambdas_m: *const f64,
         convergence: f64,
+        xx_only: ::std::os::raw::c_int,
     ) -> *const ::std::os::raw::c_char;
 }
 extern "C" {

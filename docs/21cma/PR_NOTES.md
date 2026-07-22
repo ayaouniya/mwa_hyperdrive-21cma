@@ -17,16 +17,22 @@ usable in practice:
 - remove incorrect MWA coarse-channel assumptions from non-MWA inputs
 - fix 21CMA measurement-set weight expansion for 1D per-correlation weights
 - support irregular 21CMA timestamps in the read, average, and write path
+- treat 21CMA data as single XX throughout reading, calibration, modelling,
+  peeling, and MS/UVFITS output
+- fix XX-only ionospheric fitting and the `num-passes`/`num-loops` mapping
+- optionally restore sky-model sources not selected by `--iono-sub`
 - add `--telescope 21cma` to isolate the 21CMA route explicitly
-- add initial 21CMA beam plumbing with `cma21-stub` and `cma21-gaussian`
+- add 21CMA beam plumbing with `cma21-stub`, `cma21-gaussian`, and
+  `cma21-feko-cube`
 - add tests and a small `MS` preflight helper
 
 ## Validation
 
 Passed:
 
-- `cargo test --lib`
+- `cargo test --lib` (309 tests)
 - `cargo test --test integration_tests`
+- CUDA single-source, XX-only single-source, and multi-source peel tests
 
 Real-data checks completed on 21CMA `MS` subsets:
 

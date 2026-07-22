@@ -34,7 +34,7 @@ use vec1::{vec1, Vec1};
 use crate::{
     averaging::{Spw, Timeblock},
     cli::Warn,
-    context::Telescope,
+    context::{Polarisations, Telescope},
 };
 
 #[derive(Debug, Display, EnumIter, EnumString, Clone, Copy)]
@@ -104,6 +104,7 @@ pub(crate) struct VisTimestep {
 /// * `marlu_mwa_obs_context` - a tuple of [`marlu::MwaObsContext`] and a range
 ///   of MWA coarse channel indices. Kept optional because they're not strictly
 ///   needed.
+/// * `polarisations` - the instrumental correlations to write.
 /// * `rx` - the channel to receive visibilities from.
 /// * `error` - a thread-safe [`bool`] to indicate if an error has occurred.
 ///   Receiving `true` signals that we should not continue, as another thread
@@ -133,6 +134,7 @@ pub(crate) fn write_vis(
     marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
     write_smallest_contiguous_band: bool,
     processing_telescope: Telescope,
+    polarisations: Polarisations,
     rx: Receiver<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
@@ -189,6 +191,13 @@ pub(crate) fn write_vis(
 
     let start_timestamp = timeblocks.first().median;
     let num_baselines = unflagged_baseline_tile_pairs.len();
+    // Marlu's visibility ordering supports XX, then XX/YY, then
+    // XX/YY/XY. A YY-only product cannot be represented by the count alone,
+    // so retain the four-product container for that uncommon case.
+    let num_vis_pols = match polarisations {
+        Polarisations::YY => 4,
+        pols => usize::from(pols.num_pols()),
+    };
     let vis_ctx = VisContext {
         num_sel_timesteps: timeblocks.len() * time_average_factor.get(),
         start_timestamp,
@@ -199,7 +208,7 @@ pub(crate) fn write_vis(
         sel_baselines: unflagged_baseline_tile_pairs.to_vec(),
         avg_time: time_average_factor.get(),
         avg_freq: freq_average_factor.get(),
-        num_vis_pols: 4,
+        num_vis_pols,
     };
 
     let sched_start_timestamp = match obsid {

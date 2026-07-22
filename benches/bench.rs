@@ -37,7 +37,8 @@ fn model_benchmarks(c: &mut Criterion) {
     let timestamp = Epoch::from_gpst_seconds(1065880128.0);
     let xyzs = vec![XyzGeodetic::default(); num_tiles];
     let flagged_tiles = HashSet::new();
-    let beam = create_beam_object(Some("fee"), num_tiles, Delays::Partial(vec![0; 16])).unwrap();
+    let beam =
+        create_beam_object(Some("fee"), num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();
 
     let mut points = c.benchmark_group("model FEE points");
     for (num_power_law_points, num_chans) in [(10, 2), (100, 2)] {

@@ -18,6 +18,9 @@ use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
+use marlu::{c32, Jones};
+use ndarray::ArrayViewMut2;
+
 use crate::{beam::Delays, io::read::VisInputType};
 
 /// Explicit telescope-specific processing routes.
@@ -85,6 +88,23 @@ impl Polarisations {
             Polarisations::XX_YY => 2,
             Polarisations::XX_YY_XY => 3,
         }
+    }
+
+    /// Set unavailable instrumental correlations to zero.
+    pub(crate) fn mask(self, mut vis: ArrayViewMut2<Jones<f32>>) {
+        if matches!(self, Self::XX_XY_YX_YY) {
+            return;
+        }
+
+        vis.iter_mut().for_each(|j| {
+            *j = match self {
+                Self::XX_XY_YX_YY => *j,
+                Self::XX => Jones::from([j[0], c32::default(), c32::default(), c32::default()]),
+                Self::YY => Jones::from([c32::default(), c32::default(), c32::default(), j[3]]),
+                Self::XX_YY => Jones::from([j[0], c32::default(), c32::default(), j[3]]),
+                Self::XX_YY_XY => Jones::from([j[0], j[1], c32::default(), j[3]]),
+            }
+        });
     }
 }
 

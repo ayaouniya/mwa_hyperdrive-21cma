@@ -113,6 +113,20 @@ pub(crate) struct PeelCliArgs {
     #[arg(long, help = CONVERGENCE_HELP.as_str(), help_heading = "PEELING")]
     pub(super) convergence: Option<f64>,
 
+    /// Fit ionospheric offsets and gain using XX only instead of Stokes I
+    /// (XX+YY). This is useful for single-polarisation instruments and XX-only
+    /// science products whose measurement sets still advertise four products.
+    #[arg(long, help_heading = "PEELING")]
+    #[serde(default)]
+    pub(super) iono_xx_only: bool,
+
+    /// Use non-ionospheric sky-model sources to constrain the fit, but add
+    /// their direct models back before writing the output visibilities. This
+    /// leaves only the --iono-sub sources subtracted from the output.
+    #[arg(long, help_heading = "PEELING")]
+    #[serde(default)]
+    pub(super) preserve_non_iono_sources: bool,
+
     #[arg(short, long, num_args(1..), help = VIS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) outputs: Option<Vec<PathBuf>>,
 
@@ -216,6 +230,8 @@ impl PeelArgs {
                     uvw_max,
                     short_baseline_sigma,
                     convergence,
+                    iono_xx_only,
+                    preserve_non_iono_sources,
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
@@ -232,6 +248,8 @@ impl PeelArgs {
         };
 
         let obs_context = input_vis_params.get_obs_context();
+        let iono_xx_only =
+            iono_xx_only || matches!(obs_context.polarisations, crate::context::Polarisations::XX);
         let total_num_tiles = input_vis_params.get_total_num_tiles();
 
         let beam = beam_args.parse(
@@ -546,6 +564,16 @@ impl PeelArgs {
                 num_sources_to_iono_subtract
             )
             .into(),
+            if preserve_non_iono_sources {
+                "Restoring non-ionospheric sources in output visibilities".into()
+            } else {
+                "Leaving all sky-model sources subtracted".into()
+            },
+            if iono_xx_only {
+                "Fitting ionospheric offsets and gain from XX".into()
+            } else {
+                "Fitting ionospheric offsets and gain from XX+YY".into()
+            },
         ]);
         if num_sources_to_iono_subtract > 0 {
             let mut block = vec![];
@@ -590,6 +618,7 @@ impl PeelArgs {
             num_passes,
             num_loops,
             convergence,
+            iono_xx_only,
         };
 
         let peel_weight_params = PeelWeightParams {
@@ -612,6 +641,7 @@ impl PeelArgs {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            preserve_non_iono_sources,
         })
     }
 
@@ -644,6 +674,9 @@ impl PeelCliArgs {
             uvw_max: self.uvw_max.or(other.uvw_max),
             short_baseline_sigma: self.short_baseline_sigma.or(other.short_baseline_sigma),
             convergence: self.convergence.or(other.convergence),
+            iono_xx_only: self.iono_xx_only || other.iono_xx_only,
+            preserve_non_iono_sources: self.preserve_non_iono_sources
+                || other.preserve_non_iono_sources,
             outputs: self.outputs.or(other.outputs),
             output_vis_time_average: self
                 .output_vis_time_average

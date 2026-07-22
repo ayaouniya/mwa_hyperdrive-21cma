@@ -17,7 +17,7 @@ use crate::{
     averaging::{
         channels_to_chanblocks, chunked_timestamps_to_timeblocks, timesteps_to_timeblocks,
     },
-    context::Telescope,
+    context::{Polarisations, Telescope},
     io::read::{MsReader, UvfitsReader, VisRead},
     math::TileBaselineFlags,
 };
@@ -99,10 +99,14 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
-        num_vis_pols: 4,
+        num_vis_pols: 1,
     };
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let out_vis_paths = vec1![(tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)];
+    let out_vis_paths = Vec1::try_from_vec(vec![
+        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet),
+        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
+    ])
+    .unwrap();
 
     let array_pos = LatLngHeight::mwa();
     let phase_centre = RADec::from_degrees(0., -27.);
@@ -167,6 +171,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 marlu_mwa_obs_context,
                 false,
                 Telescope::Standard,
+                Polarisations::XX,
                 rx,
                 &error,
                 None,
@@ -192,12 +197,13 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     // Read the visibilities in and check everything is fine.
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => unreachable!("21CMA irregular-time output is MS-only"),
+            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new(path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
+        assert_eq!(obs_context.polarisations, Polarisations::XX);
         assert_eq!(&obs_context.all_timesteps, &timesteps);
 
         let expected = vec1![
@@ -238,7 +244,9 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 )
                 .unwrap();
 
-            assert_abs_diff_eq!(vis_data.slice(s![i_timestep, .., ..]), avg_data);
+            let mut expected = vis_data.slice(s![i_timestep, .., ..]).to_owned();
+            Polarisations::XX.mask(expected.view_mut());
+            assert_abs_diff_eq!(expected, avg_data);
             assert_abs_diff_eq!(
                 vis_weights.slice(s![i_timestep, .., ..]),
                 avg_weights.view()
@@ -368,6 +376,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 marlu_mwa_obs_context,
                 false,
                 Telescope::Standard,
+                Polarisations::XX_XY_YX_YY,
                 rx,
                 &error,
                 None,
@@ -454,7 +463,8 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
     let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
 
     let num_channels = 4;
-    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+    let cross_pairs = [(0, 1), (0, 2), (1, 2)];
+    let ant_pairs = vec![(0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2)];
     let time_res = Duration::from_seconds(3.5);
     let timestamps = Vec1::try_from_vec(
         [1090000000.4, 1090000003.5, 1090000007.5]
@@ -492,8 +502,10 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
     ];
     let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
 
-    let shape = (timestamps.len(), num_channels, ant_pairs.len());
+    let shape = (timestamps.len(), num_channels, cross_pairs.len());
     let (vis_data, vis_weights) = synthesize_test_data(shape);
+    let (auto_data, auto_weights) =
+        synthesize_test_data((timestamps.len(), num_channels, tile_xyzs.len()));
     let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
 
     let (tx, rx) = bounded(1);
@@ -504,7 +516,10 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
                 match tx.send(VisTimestep {
                     cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
                     cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
-                    autos: None,
+                    autos: Some((
+                        auto_data.slice(s![i_timestep, .., ..]).to_shared(),
+                        auto_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    )),
                     timestamp,
                     output_timestamp: timestamp,
                 }) {
@@ -537,6 +552,7 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
                 None,
                 false,
                 Telescope::Cma21,
+                Polarisations::XX,
                 rx,
                 &error,
                 None,
@@ -567,6 +583,7 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
             }
         };
         let obs_context = reader.get_obs_context();
+        assert_eq!(obs_context.polarisations, Polarisations::XX);
         for (got, expected) in obs_context.timestamps.iter().zip(timestamps.iter()) {
             assert_abs_diff_eq!(
                 got.to_gpst_seconds(),
@@ -576,27 +593,42 @@ fn test_vis_output_preserves_irregular_21cma_timestamps() {
         }
         assert!(obs_context.time_res.is_some());
 
-        let avg_shape = (obs_context.fine_chan_freqs.len(), ant_pairs.len());
+        assert!(obs_context.autocorrelations_present);
+        let avg_shape = (obs_context.fine_chan_freqs.len(), cross_pairs.len());
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
+        let auto_shape = (obs_context.fine_chan_freqs.len(), tile_xyzs.len());
+        let mut avg_auto_data = Array2::zeros(auto_shape);
+        let mut avg_auto_weights = Array2::zeros(auto_shape);
         let flagged_fine_chans: HashSet<u16> =
             obs_context.flagged_fine_chans.iter().copied().collect();
 
         for i_timestep in 0..timestamps.len() {
             reader
-                .read_crosses(
+                .read_crosses_and_autos(
                     avg_data.view_mut(),
                     avg_weights.view_mut(),
+                    avg_auto_data.view_mut(),
+                    avg_auto_weights.view_mut(),
                     i_timestep,
                     &tile_baseline_flags,
                     &flagged_fine_chans,
                 )
                 .unwrap();
 
-            assert_abs_diff_eq!(vis_data.slice(s![i_timestep, .., ..]), avg_data);
+            let mut expected = vis_data.slice(s![i_timestep, .., ..]).to_owned();
+            Polarisations::XX.mask(expected.view_mut());
+            assert_abs_diff_eq!(expected, avg_data);
             assert_abs_diff_eq!(
                 vis_weights.slice(s![i_timestep, .., ..]),
                 avg_weights.view()
+            );
+            let mut expected_autos = auto_data.slice(s![i_timestep, .., ..]).to_owned();
+            Polarisations::XX.mask(expected_autos.view_mut());
+            assert_abs_diff_eq!(expected_autos, avg_auto_data);
+            assert_abs_diff_eq!(
+                auto_weights.slice(s![i_timestep, .., ..]),
+                avg_auto_weights.view()
             );
         }
     }
@@ -731,6 +763,7 @@ fn test_vis_output_time_averaging() {
                 marlu_mwa_obs_context,
                 false,
                 Telescope::Standard,
+                Polarisations::XX_XY_YX_YY,
                 rx,
                 &error,
                 None,

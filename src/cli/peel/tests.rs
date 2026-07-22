@@ -259,6 +259,7 @@ fn test_peel_writes_files() {
                 num_passes,
                 num_loops,
                 convergence,
+                iono_xx_only: _,
             },
         num_sources_to_iono_subtract,
         ..

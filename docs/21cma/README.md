@@ -14,6 +14,7 @@ The main non-beam parts are in place and have been regression-tested:
 - non-MWA inputs no longer get fake MWA coarse-channel metadata
 - 21CMA `MS` `WEIGHT` handling is fixed for 1D per-correlation layouts
 - irregular 21CMA timestamps are preserved through the `MS` write path
+- 21CMA data are processed and written as the physically present XX product
 - an explicit `--telescope 21cma` route isolates the 21CMA behaviour
 
 The remaining clearly provisional part is the beam model.
@@ -23,10 +24,12 @@ Current 21CMA beam options:
 - `none`
 - `cma21-stub`
 - `cma21-gaussian`
+- `cma21-feko-cube`
 
 `cma21-stub` is an identity placeholder.
 `cma21-gaussian` is a temporary NCP-centred Gaussian beam for development and
 early imaging checks.
+`cma21-feko-cube` reads an offline FEKO-derived HDF5 beam cube.
 
 ## Main changes relative to upstream
 
@@ -57,12 +60,33 @@ coarse-channel metadata.
 - fixed expansion of 1D `WEIGHT` columns in 21CMA-like `MS` layouts
 - improved cadence inference for irregular timestamps
 - preserved native fractional channel spacing
+- separated stored correlations from the correlations used scientifically
+- wrote correct single-XX `DATA`, `FLAG`, `WEIGHT`, and `POLARIZATION` shapes
+
+Older fork outputs may advertise four correlations even though only XX was
+measured. With `--telescope 21cma`, these files are read as XX and the other
+products are masked before and after calibration. Newly written MS and UVFITS
+products carry true single-XX metadata.
 
 ### Irregular timestamps
 
 The 21CMA route separates modelling time from output placement time and
 preserves native `MS` timestamps on `MS` output instead of snapping them to an
 ideal regular grid.
+
+### Peeling
+
+The 21CMA route automatically fits ionospheric offsets and gain from XX. The
+same behaviour can be requested explicitly for a legacy product with
+`--iono-xx-only`.
+
+By default, peel output retains the historical Hyperdrive behaviour and leaves
+the entire supplied sky model subtracted. Add `--preserve-non-iono-sources` to
+write `data - shifted(iono-sub sources)` while still using the rest of the sky
+model to form the fitting residual.
+
+`--num-passes` now controls outer passes over all sources and `--num-loops`
+controls iterations per source, matching their documented meanings.
 
 ## Usage
 
@@ -106,8 +130,9 @@ python scripts/21cma_ms_preflight.py /path/to/21cma.ms
 
 This branch passed:
 
-- `cargo test --lib`
+- `cargo test --lib` (309 tests)
 - `cargo test --test integration_tests`
+- CUDA single-source, XX-only single-source, and multi-source peel tests
 
 Real-data validation completed on 21CMA subsets for:
 

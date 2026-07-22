@@ -27,7 +27,7 @@ use crate::{
         common::{BeamArgs, ModellingArgs, OutputVisArgs, SkyModelWithVetoArgs},
         vis_simulate::{VisSimulateArgs, VisSimulateCliArgs},
     },
-    context::Telescope,
+    context::{Polarisations, Telescope},
     tests::{
         get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_uvfits,
         DataAsStrings,
@@ -54,6 +54,23 @@ fn test_explicit_21cma_route() {
     };
     let params = args.parse("").unwrap();
     assert_eq!(params.processing_telescope, Telescope::Cma21);
+    assert_eq!(params.get_obs_context().polarisations, Polarisations::XX);
+
+    let num_tiles = params.get_num_unflagged_tiles();
+    let mut data = Array2::zeros((params.spw.chanblocks.len(), num_tiles * (num_tiles - 1) / 2));
+    let mut weights = Array2::zeros(data.raw_dim());
+    params
+        .read_timeblock(
+            params.timeblocks.first(),
+            data.view_mut(),
+            weights.view_mut(),
+            None,
+            &AtomicCell::new(false),
+        )
+        .unwrap();
+    assert!(data
+        .iter()
+        .all(|j| j[1].norm_sqr() == 0.0 && j[2].norm_sqr() == 0.0 && j[3].norm_sqr() == 0.0));
 }
 
 #[test]

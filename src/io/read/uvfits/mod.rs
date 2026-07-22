@@ -1021,6 +1021,10 @@ impl VisRead for UvfitsReader {
         &self.obs_context
     }
 
+    fn set_polarisations(&mut self, polarisations: Polarisations) {
+        self.obs_context.polarisations = polarisations;
+    }
+
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::Uvfits
     }

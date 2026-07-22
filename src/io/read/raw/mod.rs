@@ -866,6 +866,10 @@ impl VisRead for RawDataReader {
         &self.obs_context
     }
 
+    fn set_polarisations(&mut self, polarisations: crate::context::Polarisations) {
+        self.obs_context.polarisations = polarisations;
+    }
+
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::Raw
     }

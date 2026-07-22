@@ -20,7 +20,7 @@ pub use gpu::SkyModellerGpu;
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
-use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
+use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::{Array2, ArrayViewMut2};
 
 use crate::{
@@ -262,24 +262,5 @@ pub fn new_sky_modeller<'a>(
 
 /// Set any unavailable polarisations to zero.
 fn mask_pols(mut vis: ArrayViewMut2<Jones<f32>>, pols: Polarisations) {
-    // Don't do anything if all pols are available.
-    if matches!(pols, Polarisations::XX_XY_YX_YY) {
-        return;
-    }
-
-    let func = |j: &mut Jones<f32>| {
-        *j = match pols {
-            Polarisations::XX_XY_YX_YY => *j,
-            Polarisations::XX => {
-                Jones::from([j[0], c32::default(), c32::default(), c32::default()])
-            }
-            Polarisations::YY => {
-                Jones::from([c32::default(), c32::default(), c32::default(), j[3]])
-            }
-            Polarisations::XX_YY => Jones::from([j[0], c32::default(), c32::default(), j[3]]),
-            Polarisations::XX_YY_XY => Jones::from([j[0], j[1], c32::default(), j[3]]),
-        }
-    };
-
-    vis.iter_mut().for_each(func);
+    pols.mask(vis.view_mut());
 }

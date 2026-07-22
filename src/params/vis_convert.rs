@@ -190,6 +190,7 @@ impl VisConvertParams {
                         input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                         output_vis_params.write_smallest_contiguous_band,
                         input_vis_params.processing_telescope,
+                        obs_context.polarisations,
                         rx_data,
                         &error,
                         Some(write_progress),

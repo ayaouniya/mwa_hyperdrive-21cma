@@ -212,16 +212,8 @@ pub(crate) struct PeelLoopParams {
     pub(crate) num_loops: NonZeroUsize,
     /// convergence factor, determines how fast the loop converges
     pub(crate) convergence: f64,
-}
-
-impl PeelLoopParams {
-    pub(crate) fn get(&self) -> (usize, usize, f64) {
-        (
-            self.num_passes.get(),
-            self.num_loops.get(),
-            self.convergence,
-        )
-    }
+    /// derive the ionospheric fit from XX rather than XX+YY
+    pub(crate) iono_xx_only: bool,
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -242,6 +234,7 @@ pub(crate) struct PeelParams {
     pub(crate) peel_weight_params: PeelWeightParams,
     pub(crate) peel_loop_params: PeelLoopParams,
     pub(crate) num_sources_to_iono_subtract: usize,
+    pub(crate) preserve_non_iono_sources: bool,
 }
 
 impl PeelParams {
@@ -260,6 +253,7 @@ impl PeelParams {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            preserve_non_iono_sources,
         } = self;
 
         let obs_context = input_vis_params.get_obs_context();
@@ -426,6 +420,8 @@ impl PeelParams {
                         input_vis_params.dut1,
                         &all_fine_chan_freqs_hz,
                         *apply_precession,
+                        *num_sources_to_iono_subtract,
+                        *preserve_non_iono_sources,
                         rx_data,
                         tx_residual,
                         &error,
@@ -450,6 +446,8 @@ impl PeelParams {
                         iono_timeblocks,
                         spw,
                         num_unflagged_cross_baselines,
+                        *preserve_non_iono_sources
+                            && *num_sources_to_iono_subtract < source_list.len(),
                         rx_residual,
                         tx_full_residual,
                         &error,
@@ -528,6 +526,7 @@ impl PeelParams {
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             output_vis_params.write_smallest_contiguous_band,
                             input_vis_params.processing_telescope,
+                            obs_context.polarisations,
                             rx_write,
                             &error,
                             write_progress,
@@ -964,6 +963,21 @@ fn iono_fit(
     model: ArrayView3<Jones<f32>>,
     lambdas_m: &[f64],
     tile_uvs_low_res: ArrayView2<UV>,
+    iono_xx_only: bool,
+) -> [f64; 4] {
+    if iono_xx_only {
+        iono_fit_inner::<true>(residual, weights, model, lambdas_m, tile_uvs_low_res)
+    } else {
+        iono_fit_inner::<false>(residual, weights, model, lambdas_m, tile_uvs_low_res)
+    }
+}
+
+fn iono_fit_inner<const XX_ONLY: bool>(
+    residual: ArrayView3<Jones<f32>>,
+    weights: ArrayView3<f32>,
+    model: ArrayView3<Jones<f32>>,
+    lambdas_m: &[f64],
+    tile_uvs_low_res: ArrayView2<UV>,
 ) -> [f64; 4] {
     let num_tiles = tile_uvs_low_res.len_of(Axis(1));
 
@@ -1029,8 +1043,16 @@ fn iono_fit(
                                 // model visibilities. It doesn't matter if the
                                 // convention is to divide by 2 or not; the
                                 // algorithm's result is algebraically the same.
-                                let residual_i = residual[0] + residual[3];
-                                let model_i = model[0] + model[3];
+                                let residual_i = if XX_ONLY {
+                                    residual[0]
+                                } else {
+                                    residual[0] + residual[3]
+                                };
+                                let model_i = if XX_ONLY {
+                                    model[0]
+                                } else {
+                                    model[0] + model[3]
+                                };
 
                                 let model_i_re = model_i.re as f64;
                                 let mr = model_i_re * (residual_i.im as f64 - model_i.im as f64);
@@ -1136,7 +1158,10 @@ fn peel_cpu(
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
-    let (num_loops, num_passes, convergence) = peel_loop_params.get();
+    let num_passes = peel_loop_params.num_passes.get();
+    let num_loops = peel_loop_params.num_loops.get();
+    let convergence = peel_loop_params.convergence;
+    let iono_xx_only = peel_loop_params.iono_xx_only;
 
     let all_fine_chan_lambdas_m = chanblocks
         .iter()
@@ -1428,6 +1453,7 @@ fn peel_cpu(
                     model_lo_src_iono_tfb.view(),
                     low_res_lambdas_m,
                     tile_uvs_lo_src.view(),
+                    iono_xx_only,
                 );
                 multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
                 let da = iono_fits[0];
@@ -1626,12 +1652,24 @@ fn subtract_thread(
     dut1: Duration,
     all_fine_chan_freqs_hz: &[f64],
     apply_precession: bool,
+    num_sources_to_iono_subtract: usize,
+    preserve_non_iono_sources: bool,
     rx_data: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
-    tx_residual: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    tx_residual: Sender<ResidualTimestep>,
     error: &AtomicCell<bool>,
     model_progress: &ProgressBar,
     sub_progress: &ProgressBar,
 ) -> Result<(), ModelError> {
+    let restore_non_iono_sources =
+        preserve_non_iono_sources && num_sources_to_iono_subtract < source_list.len();
+    let iono_source_list = restore_non_iono_sources.then(|| {
+        source_list
+            .iter()
+            .take(num_sources_to_iono_subtract)
+            .map(|(name, source)| (name.clone(), source.clone()))
+            .collect::<SourceList>()
+    });
+
     let mut cpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
         Some(SkyModellerCpu::new(
             beam,
@@ -1647,6 +1685,25 @@ fn subtract_thread(
             dut1,
             apply_precession,
         ))
+    } else {
+        None
+    };
+    let mut cpu_iono_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
+        iono_source_list.as_ref().map(|iono_source_list| {
+            SkyModellerCpu::new(
+                beam,
+                iono_source_list,
+                obs_context.polarisations,
+                unflagged_tile_xyzs,
+                all_fine_chan_freqs_hz,
+                &tile_baseline_flags.flagged_tiles,
+                obs_context.phase_centre,
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                dut1,
+                apply_precession,
+            )
+        })
     } else {
         None
     };
@@ -1671,6 +1728,27 @@ fn subtract_thread(
     } else {
         None
     };
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    let mut gpu_iono_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
+        match iono_source_list.as_ref() {
+            Some(iono_source_list) => Some(SkyModellerGpu::new(
+                beam,
+                iono_source_list,
+                obs_context.polarisations,
+                unflagged_tile_xyzs,
+                all_fine_chan_freqs_hz,
+                &tile_baseline_flags.flagged_tiles,
+                obs_context.phase_centre,
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                dut1,
+                apply_precession,
+            )?),
+            None => None,
+        }
+    } else {
+        None
+    };
 
     for (mut vis_data_fb, vis_weights_fb, timestamp) in rx_data.iter() {
         // Should we continue?
@@ -1678,6 +1756,8 @@ fn subtract_thread(
             return Ok(());
         }
         sub_progress.reset();
+
+        let input_data_fb = restore_non_iono_sources.then(|| vis_data_fb.clone());
 
         // Here, we make the data negative, and as we iterate
         // over all sources, they get modelled and added to the
@@ -1734,8 +1814,34 @@ fn subtract_thread(
             vis_data_fb += &model_vis;
         }
 
+        let restore_model_fb = if let Some(input_data_fb) = input_data_fb {
+            let mut iono_model_fb = Array2::zeros(vis_data_fb.raw_dim());
+            if let Some(modeller) = cpu_iono_modeller.as_mut() {
+                modeller.model_timestep_with(timestamp, iono_model_fb.view_mut())?;
+            }
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            if let Some(modeller) = gpu_iono_modeller.as_mut() {
+                let (model_vis, _) = modeller.model_timestep(timestamp)?;
+                iono_model_fb += &model_vis;
+            }
+
+            // At this point vis_data_fb is -data + full_model. Recover the
+            // non-ionospheric part of the model for restoration after peeling.
+            let mut restore_model_fb = vis_data_fb.clone();
+            restore_model_fb += &input_data_fb;
+            restore_model_fb -= &iono_model_fb;
+            Some(restore_model_fb)
+        } else {
+            None
+        };
+
         vis_data_fb.iter_mut().for_each(|j| *j *= -1.0);
-        match tx_residual.send((vis_data_fb, vis_weights_fb, timestamp)) {
+        match tx_residual.send(ResidualTimestep {
+            vis_residual_fb: vis_data_fb,
+            vis_weights_fb,
+            restore_model_fb,
+            timestamp,
+        }) {
             Ok(()) => (),
             Err(_) => return Ok(()),
         }
@@ -1748,8 +1854,20 @@ fn subtract_thread(
     Ok(())
 }
 
+struct ResidualTimestep {
+    vis_residual_fb: Array2<Jones<f32>>,
+    vis_weights_fb: Array2<f32>,
+    restore_model_fb: Option<Array2<Jones<f32>>>,
+    timestamp: Epoch,
+}
+
 // type for passing full residuals from joiner thread
-type FullResidual<'a> = (Array3<Jones<f32>>, Array3<f32>, &'a Timeblock);
+type FullResidual<'a> = (
+    Array3<Jones<f32>>,
+    Array3<f32>,
+    Option<Array3<Jones<f32>>>,
+    &'a Timeblock,
+);
 
 /// reshapes residuals for peel.
 /// receives a stream of 2D residuals and weights [chan, baseline]
@@ -1763,7 +1881,8 @@ fn joiner_thread<'a>(
     iono_timeblocks: &'a [Timeblock],
     spw: &Spw,
     num_unflagged_cross_baselines: usize,
-    rx_residual: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    restore_non_iono_sources: bool,
+    rx_residual: Receiver<ResidualTimestep>,
     tx_full_residual: Sender<FullResidual<'a>>,
     error: &AtomicCell<bool>,
 ) {
@@ -1774,15 +1893,24 @@ fn joiner_thread<'a>(
             num_unflagged_cross_baselines,
         ));
         let mut vis_weights_tfb = Array3::zeros(vis_residual_tfb.raw_dim());
+        let mut restore_model_tfb =
+            restore_non_iono_sources.then(|| Array3::zeros(vis_residual_tfb.raw_dim()));
 
         let timestamps = &timeblock.timestamps;
         trace!("[joiner] timestamps={timestamps:?}");
 
-        for (mut full_residual_fb, mut full_weights_fb) in izip!(
+        for (time_index, (mut full_residual_fb, mut full_weights_fb)) in izip!(
             vis_residual_tfb.outer_iter_mut(),
             vis_weights_tfb.outer_iter_mut()
-        ) {
-            let (vis_residual_fb, mut vis_weights_fb, timestamp) = rx_residual.recv().unwrap();
+        )
+        .enumerate()
+        {
+            let ResidualTimestep {
+                vis_residual_fb,
+                mut vis_weights_fb,
+                restore_model_fb,
+                timestamp,
+            } = rx_residual.recv().unwrap();
             assert!(timestamps.contains(&timestamp));
 
             // Should we continue?
@@ -1799,13 +1927,27 @@ fn joiner_thread<'a>(
 
             full_residual_fb.assign(&vis_residual_fb);
             full_weights_fb.assign(&vis_weights_fb);
+            match (restore_model_tfb.as_mut(), restore_model_fb) {
+                (Some(restore_model_tfb), Some(restore_model_fb)) => {
+                    restore_model_tfb
+                        .index_axis_mut(Axis(0), time_index)
+                        .assign(&restore_model_fb);
+                }
+                (None, None) => {}
+                _ => unreachable!("restore-model stream must be consistent"),
+            }
         }
 
         if vis_weights_tfb.sum() < 0.0 {
             warn!("[joiner] all flagged: timestamps={timestamps:?}")
         }
 
-        match tx_full_residual.send((vis_residual_tfb, vis_weights_tfb, timeblock)) {
+        match tx_full_residual.send((
+            vis_residual_tfb,
+            vis_weights_tfb,
+            restore_model_tfb,
+            timeblock,
+        )) {
             Ok(()) => (),
             Err(_) => return,
         }
@@ -1841,7 +1983,7 @@ fn peel_thread(
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
 
-    for (i, (mut vis_residual_tfb, vis_weights_tfb, timeblock)) in
+    for (i, (mut vis_residual_tfb, vis_weights_tfb, restore_model_tfb, timeblock)) in
         rx_full_residual.iter().enumerate()
     {
         // Should we continue?
@@ -1957,6 +2099,10 @@ fn peel_thread(
         match tx_iono_consts.send(iono_consts) {
             Ok(()) => (),
             Err(_) => return Ok(()),
+        }
+
+        if let Some(restore_model_tfb) = restore_model_tfb {
+            vis_residual_tfb += &restore_model_tfb;
         }
 
         for ((cross_data_fb, cross_weights_fb), timestamp) in vis_residual_tfb

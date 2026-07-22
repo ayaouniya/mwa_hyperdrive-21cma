@@ -38,7 +38,10 @@ pub(crate) fn peel_gpu(
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
-    let (num_loops, num_passes, convergence) = peel_loop_params.get();
+    let num_passes = peel_loop_params.num_passes.get();
+    let num_loops = peel_loop_params.num_loops.get();
+    let convergence = peel_loop_params.convergence;
+    let iono_xx_only = peel_loop_params.iono_xx_only;
 
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
@@ -565,6 +568,7 @@ pub(crate) fn peel_gpu(
                     d_low_res_uvws.get(),
                     d_low_res_lambdas.get(),
                     convergence as GpuFloat,
+                    i32::from(iono_xx_only),
                 )?;
                 pb_trace!("{:?}: iono_loop", start.elapsed());
 

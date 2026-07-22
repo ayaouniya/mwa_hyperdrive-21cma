@@ -139,6 +139,7 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
+marlu = { path = "vendor/marlu-0.17.1" }
 # Temp soft links here while testing
 #birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
 #mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }

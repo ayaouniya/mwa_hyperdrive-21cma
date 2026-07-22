@@ -171,6 +171,10 @@ pub struct MsReader {
     /// Input data metadata.
     obs_context: ObsContext,
 
+    /// Correlations physically present in each DATA cell. This stays distinct
+    /// from the scientific correlations exposed through `obs_context`.
+    storage_polarisations: Polarisations,
+
     /// The path to the measurement set on disk.
     ms: PathBuf,
 
@@ -829,13 +833,10 @@ impl MsReader {
                 // are flagged, flag the whole channel.
                 let flagged_fine_chans: Vec<bool> =
                     main_table.get_cell_as_vec("FLAG", row_range.start)?;
-                // If there are 4x as many flags as there are fine channels,
-                // then we assume its because there's a flag specified for each
-                // polarisation. Which is dumb. If any of the 4 flags for a
-                // channel are flagged, we consider the channel flagged.
-                if (flagged_fine_chans.len() / fine_chan_freqs.len()) % 4 == 0 {
+                let num_pols = usize::from(pols.num_pols());
+                if flagged_fine_chans.len() == fine_chan_freqs.len() * num_pols {
                     flagged_fine_chans
-                        .chunks_exact(4)
+                        .chunks_exact(num_pols)
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))
                         .collect()
                 } else {
@@ -1022,6 +1023,7 @@ impl MsReader {
 
         let ms = MsReader {
             obs_context,
+            storage_polarisations: pols,
             ms,
             step,
             metafits_context: mwalib_context,
@@ -1279,7 +1281,7 @@ impl MsReader {
                             let (ms_data_raw, ms_data_offset) = ms_data.into_raw_vec_and_offset();
                             assert!(ms_data_offset.unwrap_or(0) == 0);
                             ms_data_raw
-                                .chunks_exact(4)
+                                .chunks_exact(NUM_POLS)
                                 .zip(chan_flags.iter())
                                 .filter(|(_, &chan_flag)| !chan_flag)
                                 .zip(out_vis.iter_mut())
@@ -1305,7 +1307,7 @@ impl MsReader {
                             assert!(flags_offset.unwrap_or(0) == 0);
                             ms_weights
                                 .into_iter()
-                                .zip(flags_raw.chunks_exact(4))
+                                .zip(flags_raw.chunks_exact(NUM_POLS))
                                 .zip(chan_flags.iter())
                                 .filter(|((_, _), &chan_flag)| !chan_flag)
                                 .zip(out_weights.iter_mut())
@@ -1324,7 +1326,7 @@ impl MsReader {
         // Transform the data, depending on what the actual polarisations are.
         if let Some(crosses) = crosses.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
+            match (self.conjugate_vis, self.storage_polarisations) {
                 // These pols are all handled correctly.
                 (false, Polarisations::XX_XY_YX_YY) => (),
                 (false, Polarisations::XX) => (),
@@ -1363,7 +1365,7 @@ impl MsReader {
         }
         if let Some(autos) = autos.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
+            match (self.conjugate_vis, self.storage_polarisations) {
                 // These pols are all handled correctly.
                 (false, Polarisations::XX_XY_YX_YY) => (),
                 (false, Polarisations::XX) => (),
@@ -1410,6 +1412,10 @@ impl VisRead for MsReader {
         &self.obs_context
     }
 
+    fn set_polarisations(&mut self, polarisations: Polarisations) {
+        self.obs_context.polarisations = polarisations;
+    }
+
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::MeasurementSet
     }
@@ -1435,14 +1441,14 @@ impl VisRead for MsReader {
         timestep: usize,
         flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
-        match self.obs_context.polarisations.num_pols() {
+        match self.storage_polarisations.num_pols() {
             4 => self.read_inner::<4>(cross_data, auto_data, timestep, flagged_fine_chans),
             3 => self.read_inner::<3>(cross_data, auto_data, timestep, flagged_fine_chans),
             2 => self.read_inner::<2>(cross_data, auto_data, timestep, flagged_fine_chans),
             1 => self.read_inner::<1>(cross_data, auto_data, timestep, flagged_fine_chans),
             _ => unimplemented!(
                 "num pols must be 1-4, got {}",
-                self.obs_context.polarisations.num_pols()
+                self.storage_polarisations.num_pols()
             ),
         }
     }

@@ -29,7 +29,11 @@ use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
 
-use crate::{context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags};
+use crate::{
+    context::{ObsContext, Polarisations},
+    flagging::MwafFlags,
+    math::TileBaselineFlags,
+};
 
 const MWA_COARSE_CHAN_WIDTH_HZ: f64 = 1.28e6;
 
@@ -78,6 +82,10 @@ pub(crate) enum VisInputType {
 
 pub(crate) trait VisRead: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
+
+    /// Override the scientific correlations exposed to processing without
+    /// changing how many correlations are physically stored in the input.
+    fn set_polarisations(&mut self, polarisations: Polarisations);
 
     fn get_input_data_type(&self) -> VisInputType;
 

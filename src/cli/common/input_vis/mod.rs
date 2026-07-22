@@ -36,7 +36,7 @@ use crate::{
     },
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
-    context::Telescope,
+    context::{Polarisations, Telescope},
     io::read::{
         pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
         MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
@@ -527,6 +527,17 @@ impl InputVisArgs {
             }
             (None, None, None, None, None) => return Err(InputVisArgsError::NoInputData),
         };
+
+        if processing_telescope == Telescope::Cma21 {
+            let input_pols = vis_reader.get_obs_context().polarisations;
+            if input_pols != Polarisations::XX {
+                format!(
+                    "21CMA processing uses XX only; ignoring input correlations advertised as {input_pols}"
+                )
+                .warn();
+                vis_reader.set_polarisations(Polarisations::XX);
+            }
+        }
 
         let total_num_tiles = vis_reader.get_obs_context().get_total_num_tiles();
 

@@ -239,9 +239,6 @@ impl InputVisParams {
                 unaveraged_cross_weights_tfb
                     .slice_mut(s![.., i_chan, ..])
                     .mapv_inplace(|w| -w.abs());
-                unaveraged_cross_weights_tfb
-                    .slice_mut(s![.., i_chan, ..])
-                    .mapv_inplace(|w| -w.abs());
                 if let Some((_, unaveraged_auto_weights_tfb)) = unaveraged_autos.as_mut() {
                     unaveraged_auto_weights_tfb
                         .slice_mut(s![.., i_chan, ..])
@@ -306,15 +303,15 @@ impl InputVisParams {
             debug!("Averaging input data from timeblock {}", timeblock.index);
             vis_average(
                 unaveraged_cross_data_tfb.view(),
-                cross_data_fb,
+                cross_data_fb.view_mut(),
                 unaveraged_cross_weights_tfb.view(),
-                cross_weights_fb,
+                cross_weights_fb.view_mut(),
                 &self.spw.flagged_chanblock_indices,
             );
             if let (
-                Some((mut auto_data_fb, mut auto_weights_fb)),
+                Some((auto_data_fb, auto_weights_fb)),
                 Some((unaveraged_auto_data_tfb, unaveraged_auto_weights_tfb)),
-            ) = (autos_fb, unaveraged_autos)
+            ) = (autos_fb.as_mut(), unaveraged_autos)
             {
                 vis_average(
                     unaveraged_auto_data_tfb.view(),
@@ -349,9 +346,11 @@ impl InputVisParams {
                 debug!("Applying calibration solutions to input data from timestep {timestep}");
                 self.apply_solutions(
                     timestamp,
-                    cross_data_fb,
+                    cross_data_fb.view_mut(),
                     cross_weights_fb.view_mut(),
-                    autos_fb,
+                    autos_fb.as_mut().map(|(auto_data_fb, auto_weights_fb)| {
+                        (auto_data_fb.view_mut(), auto_weights_fb.view_mut())
+                    }),
                     &self
                         .spw
                         .chanblocks
@@ -360,6 +359,13 @@ impl InputVisParams {
                         .collect::<Vec<_>>(),
                 );
             }
+        }
+
+        // Calibration is a full Jones-matrix operation and can repopulate
+        // correlations that are not scientifically present in the input.
+        obs_context.polarisations.mask(cross_data_fb.view_mut());
+        if let Some((auto_data_fb, _)) = autos_fb.as_mut() {
+            obs_context.polarisations.mask(auto_data_fb.view_mut());
         }
 
         // Should we continue?
@@ -398,6 +404,9 @@ impl InputVisParams {
                     cross_weights_fb.fill(1.0);
                     auto_weights_fb.fill(1.0);
                 }
+
+                obs_context.polarisations.mask(cross_data_fb.view_mut());
+                obs_context.polarisations.mask(auto_data_fb.view_mut());
             }
 
             // Otherwise, just read the crosses.
@@ -415,6 +424,8 @@ impl InputVisParams {
                 if self.ignore_weights {
                     cross_weights_fb.fill(1.0);
                 }
+
+                obs_context.polarisations.mask(cross_data_fb.view_mut());
             }
         }
 
