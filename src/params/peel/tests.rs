@@ -155,7 +155,7 @@ fn get_simple_obs_context(s: f64) -> ObsContext {
         time_res: Some(hour_epoch - obs_epoch),
         mwa_coarse_chan_nums: None,
         num_fine_chans_per_coarse_chan: None,
-        freq_res: Some((fine_chan_freqs[1] - fine_chan_freqs[0]) as f64),
+        freq_res: Some(fine_chan_freqs[1] - fine_chan_freqs[0]),
         fine_chan_freqs,
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
@@ -350,11 +350,7 @@ fn display_vis_tfb(
     let ant_pairs = (0..num_baselines)
         .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
         .collect_vec();
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     let start_seconds = obs_context.timestamps[0].to_gpst_seconds();
@@ -559,11 +555,7 @@ fn test_vis_rotation() {
     let flagged_tiles = HashSet::new();
     let num_chans = obs_context.fine_chan_freqs.len();
 
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     // source is at zenith at 1h
@@ -903,7 +895,7 @@ fn test_weight_average() {
 
     let mut weights_avg_tfb = Array3::zeros(avg_shape);
 
-    weights_average(weights_tfb.view(), weights_avg_tfb.view_mut());
+    weights_average(weights_tfb.view(), weights_avg_tfb.view_mut(), 2);
 
     assert_eq!(
         weights_avg_tfb,
@@ -949,7 +941,12 @@ fn test_vis_average() {
 
     let mut vis_avg_tfb = Array3::zeros(avg_shape);
 
-    vis_average_tfb(vis_tfb.view(), vis_avg_tfb.view_mut(), weights_tfb.view());
+    vis_average_tfb(
+        vis_tfb.view(),
+        vis_avg_tfb.view_mut(),
+        weights_tfb.view(),
+        2,
+    );
 
     assert_eq!(
         vis_avg_tfb.slice(s![.., .., 0]),
@@ -1000,11 +997,7 @@ fn test_apply_iono_tfb() {
     let flagged_tiles = HashSet::new();
     let num_chans = obs_context.fine_chan_freqs.len();
 
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     // source is at zenith at 1h
@@ -1123,11 +1116,7 @@ fn test_get_weights_rts() {
     let num_tiles = obs_context.get_total_num_tiles();
     let num_times = obs_context.timestamps.len();
 
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     // tile uvs and ws in the source phase centre
@@ -1166,11 +1155,7 @@ fn test_iono_fit() {
     let num_chans = obs_context.fine_chan_freqs.len();
 
     // lambda = 1m
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     // source is at zenith at 1h
@@ -1326,11 +1311,7 @@ fn test_unpeel_model() {
     let num_chans = obs_context.fine_chan_freqs.len();
 
     // lambda = 1m
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
     // source is at zenith at 1h
@@ -1584,16 +1565,12 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
         .map(|(i, f)| Chanblock {
             chanblock_index: i as u16,
             unflagged_index: i as u16,
-            freq: *f as f64,
+            freq: *f,
         })
         .collect_vec();
 
     // lambda = 1m
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
     let avg_freq = 4;
     let low_res_lambdas_m = obs_context
@@ -1751,6 +1728,7 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
+                    avg_freq,
                     &obs_context,
                     &tile_baseline_flags,
                     &mut *high_res_modeller,
@@ -1786,6 +1764,7 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
                         &peel_loop_params,
                         &chanblocks,
                         &low_res_lambdas_m,
+                        avg_freq,
                         &obs_context,
                         &tile_baseline_flags,
                         &mut high_res_modeller,
@@ -1868,16 +1847,12 @@ fn test_peel_multi_source(peel_type: PeelType) {
         .map(|(i, f)| Chanblock {
             chanblock_index: i as u16,
             unflagged_index: i as u16,
-            freq: *f as f64,
+            freq: *f,
         })
         .collect_vec();
 
     // lambda = 1m
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let avg_freq_hz = fine_chan_freqs_hz.iter().sum::<f64>() / fine_chan_freqs_hz.len() as f64;
     // let avg_lambda_m = VEL_C / avg_freq_hz;
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
@@ -2093,6 +2068,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &peel_loop_params,
                 &chanblocks,
                 &low_res_lambdas_m,
+                avg_freq,
                 &obs_context,
                 &tile_baseline_flags,
                 &mut *high_res_modeller,
@@ -2128,6 +2104,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
+                    avg_freq,
                     &obs_context,
                     &tile_baseline_flags,
                     &mut high_res_modeller,
@@ -2637,11 +2614,7 @@ mod gpu_tests {
         let num_chans = obs_context.fine_chan_freqs.len();
 
         // lambda = 1m
-        let fine_chan_freqs_hz = obs_context
-            .fine_chan_freqs
-            .iter()
-            .map(|&f| f as f64)
-            .collect_vec();
+        let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
         let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
         // source is at zenith at 1h
@@ -2976,15 +2949,11 @@ fn test_peel_weight_preservation() {
         .map(|(i, f)| Chanblock {
             chanblock_index: i as u16,
             unflagged_index: i as u16,
-            freq: *f as f64,
+            freq: *f,
         })
         .collect_vec();
 
-    let fine_chan_freqs_hz = obs_context
-        .fine_chan_freqs
-        .iter()
-        .map(|&f| f as f64)
-        .collect_vec();
+    let fine_chan_freqs_hz = obs_context.fine_chan_freqs.iter().copied().collect_vec();
     let _lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
     let avg_freq = 4;
     let low_res_lambdas_m = obs_context
@@ -3132,7 +3101,9 @@ fn test_peel_weight_preservation() {
         // Create a new channel to pass the reference tuple to peel_thread
         let (tx_ref, rx_ref) = crossbeam_channel::bounded(1);
         for (a, b, c, d_ref) in rx_full_residual_ref {
-            tx_ref.send((a, b, c, d_ref)).unwrap();
+            tx_ref
+                .send((a, b, c, d_ref, vec![None; num_times]))
+                .unwrap();
         }
         drop(tx_ref);
         peel_thread(
@@ -3147,6 +3118,7 @@ fn test_peel_weight_preservation() {
             &tile_baseline_flags,
             &chanblocks,
             &low_res_lambdas_m,
+            avg_freq,
             apply_precession,
             Some(&output_vis_params), // pass output_vis_params
             rx_ref,
@@ -3194,4 +3166,58 @@ fn test_peel_weight_preservation() {
             assert_abs_diff_eq!(actual, expected, epsilon = 1e-6);
         }
     }
+}
+
+#[test]
+fn test_partial_frequency_average_and_empty_blocks() {
+    let data = Array3::from_shape_fn((1, 10, 1), |(_, f, _)| Jones::identity() * (f + 1) as f32);
+    let weights = Array3::ones((1, 10, 1));
+    let mut averaged = Array3::zeros((1, 2, 1));
+    let mut averaged_weights = Array3::zeros((1, 2, 1));
+    vis_average_tfb(data.view(), averaged.view_mut(), weights.view(), 6);
+    weights_average(weights.view(), averaged_weights.view_mut(), 6);
+    assert_eq!(averaged[[0, 0, 0]], Jones::identity() * 3.5);
+    assert_eq!(averaged[[0, 1, 0]], Jones::identity() * 8.5);
+    assert_eq!(averaged_weights[[0, 0, 0]], 6.);
+    assert_eq!(averaged_weights[[0, 1, 0]], 4.);
+    let flagged = Array3::zeros((1, 10, 1));
+    let invalid = Array3::from_elem((1, 10, 1), Jones::identity() * f32::NAN);
+    vis_average_tfb(invalid.view(), averaged.view_mut(), flagged.view(), 6);
+    assert!(averaged.iter().all(|j| *j == Jones::zero()));
+}
+
+#[test]
+fn test_peel_cpu_single_source_xx() {
+    test_peel_single_source(PeelType::CPU, true)
+}
+
+#[test]
+fn test_iono_gain_for_complex_source_model() {
+    // Non-collinear baselines and a resolved source with arbitrary visibility
+    // phases. A pure gain error must not produce a spurious position shift.
+    let tile_uvs = array![[
+        UV { u: 0., v: 0. },
+        UV { u: 100., v: 0. },
+        UV { u: 0., v: 100. }
+    ]];
+    let model = Array3::from_shape_fn((1, 1, 3), |(_, _, b)| {
+        let xx = [
+            Complex::new(0., 2.),
+            Complex::new(1., 1.),
+            Complex::new(-2., 0.5),
+        ][b];
+        Jones::from([xx, Complex::zero(), Complex::zero(), Complex::zero()])
+    });
+    let data = model.mapv(|j| j * 1.1);
+    let fit = iono_fit(
+        data.view(),
+        Array3::ones((1, 1, 3)).view(),
+        model.view(),
+        &[2.],
+        tile_uvs.view(),
+        true,
+    );
+    assert_abs_diff_eq!(fit[0], 0., epsilon = 1e-10);
+    assert_abs_diff_eq!(fit[1], 0., epsilon = 1e-10);
+    assert_abs_diff_eq!(fit[2] / fit[3], 1.1, epsilon = 1e-7);
 }

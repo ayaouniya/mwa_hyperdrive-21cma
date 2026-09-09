@@ -18,7 +18,10 @@
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use std::f64::consts::FRAC_PI_2;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use hdf5_metno::File as Hdf5File;
 use marlu::{AzEl, Jones};
@@ -42,8 +45,8 @@ pub(crate) struct Cma21FekoCubeBeam {
     freq_hz: Vec<f64>,
     theta_deg: Vec<f64>,
     phi_deg: Vec<f64>,
-    beam_xx: Vec<f64>,
-    beam_yy: Option<Vec<f64>>,
+    beam_xx: Arc<[f64]>,
+    beam_yy: Option<Arc<[f64]>>,
     n_theta: usize,
     n_phi: usize,
 }
@@ -86,8 +89,9 @@ impl Cma21FekoCubeBeam {
             freq_hz,
             theta_deg,
             phi_deg,
-            beam_xx,
-            beam_yy,
+            // Immutable cubes are shared by GPU modellers and source updates.
+            beam_xx: beam_xx.into(),
+            beam_yy: beam_yy.map(Into::into),
             n_theta,
             n_phi,
         })
@@ -508,8 +512,8 @@ impl BeamGpu for Cma21FekoCubeBeamGpu {
             .map(|(&az, &za)| AzEl::from_radians(az as f64, FRAC_PI_2 - za as f64))
             .collect::<Vec<_>>();
 
-        let cpu_object = self.cpu_object.clone();
-        let freqs_hz = self.freqs_hz.clone();
+        let cpu_object = &self.cpu_object;
+        let freqs_hz = &self.freqs_hz;
         let mut beam_cube = Array2::zeros((freqs_hz.len(), az_rad.len()));
         beam_cube
             .outer_iter_mut()
@@ -619,7 +623,7 @@ impl BeamGpu for Cma21GaussianBeamGpu {
             .collect::<Vec<_>>();
 
         let cpu_object = self.cpu_object;
-        let freqs_hz = self.freqs_hz.clone();
+        let freqs_hz = &self.freqs_hz;
         let mut beam_cube = Array2::zeros((freqs_hz.len(), az_rad.len()));
         beam_cube
             .outer_iter_mut()

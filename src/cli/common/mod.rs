@@ -159,6 +159,7 @@ pub(super) struct OutputVisArgs {
 }
 
 impl OutputVisArgs {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn parse(
         self,
         input_vis_time_res: Duration,
@@ -237,7 +238,14 @@ impl OutputVisArgs {
         };
 
         let output_files = {
-            let outputs = outputs.unwrap_or_else(|| vec![PathBuf::from(default_output_filename)]);
+            let outputs = outputs.unwrap_or_else(|| {
+                let path = PathBuf::from(default_output_filename);
+                vec![if processing_telescope == Telescope::Cma21 {
+                    path.with_extension("ms")
+                } else {
+                    path
+                }]
+            });
             let mut valid_outputs = Vec::with_capacity(outputs.len());
             for file in outputs {
                 // Is the output file type supported?

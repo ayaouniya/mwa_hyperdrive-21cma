@@ -1151,12 +1151,11 @@ impl InputVisArgs {
         }
         chan_printer.push_block(block);
         match obs_context.fine_chan_freqs.as_slice() {
-            [f] => chan_printer
-                .push_line(format!("Only fine-channel: {:.3} MHz", *f as f64 / 1e6).into()),
+            [f] => chan_printer.push_line(format!("Only fine-channel: {:.3} MHz", *f / 1e6).into()),
 
             [f, .., l] => chan_printer.push_block(vec![
-                format!("First fine-channel:           {:.3} MHz", *f as f64 / 1e6).into(),
-                format!("Last fine-channel:            {:.3} MHz", *l as f64 / 1e6).into(),
+                format!("First fine-channel:           {:.3} MHz", *f / 1e6).into(),
+                format!("Last fine-channel:            {:.3} MHz", *l / 1e6).into(),
             ]),
 
             [] => unreachable!("cannot be empty"),

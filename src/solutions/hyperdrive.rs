@@ -19,6 +19,7 @@ use fitsio::{
     FitsFile,
 };
 use hifitime::Epoch;
+use log::warn;
 use marlu::{constants::VEL_C, Jones};
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -794,6 +795,32 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         one_dim_index += 8;
     }
     hdu.write_image(&mut fptr, &fits_image_data)?;
+
+    // AO binaries only retain the overall start/end, even for multiple solution
+    // blocks. Those summaries cannot be written as per-block FITS timestamps:
+    // doing so creates a file that our reader rejects. Omit incomplete metadata
+    // rather than inventing timestamps for potentially irregular observations.
+    let complete_timestamps = |name: &str, timestamps: &Option<Vec1<Epoch>>| {
+        if let Some(timestamps) = timestamps {
+            if timestamps.len() != num_timeblocks {
+                warn!(
+                    "Omitting {name} timestamps from FITS: {} values for {num_timeblocks} solution blocks; per-block times are unavailable",
+                    timestamps.len()
+                );
+                return false;
+            }
+        }
+        true
+    };
+    let start_timestamps = start_timestamps
+        .as_ref()
+        .filter(|_| complete_timestamps("start", start_timestamps));
+    let end_timestamps = end_timestamps
+        .as_ref()
+        .filter(|_| complete_timestamps("end", end_timestamps));
+    let average_timestamps = average_timestamps
+        .as_ref()
+        .filter(|_| complete_timestamps("average", average_timestamps));
 
     // Write the timeblock information ("TIMEBLOCKS" HDU).
     if start_timestamps.is_some() || end_timestamps.is_some() || average_timestamps.is_some() {

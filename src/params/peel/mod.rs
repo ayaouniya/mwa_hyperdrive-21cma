@@ -75,7 +75,9 @@ pub(crate) struct SourceIonoConsts {
     pub(crate) betas: Vec<f64>,
     pub(crate) gains: Vec<f64>,
     pub(crate) weighted_catalogue_pos_j2000: RADec,
-    // pub(crate) centroid_timestamps: Vec<Epoch>,
+    /// GPS seconds at the centroid of each fitted timeblock, aligned with the fits.
+    #[serde(default)]
+    pub(crate) centroid_timestamps_gps_seconds: Vec<f64>,
 }
 
 /// parameters relating to weighting of visibilities
@@ -274,7 +276,6 @@ impl PeelParams {
         let spw = &input_vis_params.spw;
         let all_fine_chan_freqs_hz =
             Vec1::try_from_vec(spw.chanblocks.iter().map(|c| c.freq).collect()).unwrap();
-        let all_fine_chan_lambdas_m = all_fine_chan_freqs_hz.mapped_ref(|f| VEL_C / *f);
         let (_low_res_freqs_hz, low_res_lambdas_m): (Vec<_>, Vec<_>) = low_res_spw
             .chanblocks
             .iter()
@@ -283,8 +284,6 @@ impl PeelParams {
                 (f, VEL_C / f)
             })
             .unzip();
-
-        assert!(all_fine_chan_lambdas_m.len() % low_res_lambdas_m.len() == 0);
 
         // Finding the Stokes-I-weighted `RADec` of each ionosub source.
         let source_weighted_positions = {
@@ -475,6 +474,7 @@ impl PeelParams {
                         tile_baseline_flags,
                         &spw.chanblocks,
                         &low_res_lambdas_m,
+                        low_res_spw.chans_per_chanblock.get(),
                         *apply_precession,
                         output_vis_params.as_ref(),
                         rx_full_residual,
@@ -515,12 +515,15 @@ impl PeelParams {
                             input_vis_params.time_res,
                             input_vis_params.dut1,
                             spw,
-                            &tile_baseline_flags
-                                .unflagged_cross_baseline_to_tile_map
-                                .values()
-                                .copied()
-                                .sorted()
-                                .collect::<Vec<_>>(),
+                            &if input_vis_params.using_autos {
+                                tile_baseline_flags
+                                    .get_unflagged_baseline_tile_pairs()
+                                    .collect::<Vec<_>>()
+                            } else {
+                                tile_baseline_flags
+                                    .get_unflagged_cross_baseline_tile_pairs()
+                                    .collect::<Vec<_>>()
+                            },
                             output_vis_params.output_time_average_factor,
                             output_vis_params.output_freq_average_factor,
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
@@ -558,6 +561,10 @@ impl PeelParams {
                                         betas: vec![],
                                         gains: vec![],
                                         weighted_catalogue_pos_j2000: weighted_pos,
+                                        centroid_timestamps_gps_seconds: iono_timeblocks
+                                            .iter()
+                                            .map(|tb| tb.median.to_gpst_seconds())
+                                            .collect(),
                                     },
                                 )
                             })
@@ -649,16 +656,13 @@ fn vis_average_tfb(
     jones_from_tfb: ArrayView3<Jones<f32>>,
     mut jones_to_tfb: ArrayViewMut3<Jones<f32>>,
     weight_tfb: ArrayView3<f32>,
+    avg_freq: usize,
 ) {
     let from_dims = jones_from_tfb.dim();
     let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
     let avg_time = div_ceil(
         jones_from_tfb.len_of(time_axis),
         jones_to_tfb.len_of(time_axis),
-    );
-    let avg_freq = div_ceil(
-        jones_from_tfb.len_of(freq_axis),
-        jones_to_tfb.len_of(freq_axis),
     );
 
     assert_eq!(from_dims, weight_tfb.dim());
@@ -694,28 +698,33 @@ fn vis_average_tfb(
                 for (&jones, &weight) in jones_chunk_tf.iter().zip_eq(weight_chunk_tf.iter()) {
                     // assumes weights are capped to 0. otherwise we would need to check weight >= 0
                     debug_assert!(weight >= 0.0, "weight was not capped to zero: {}", weight);
+                    if weight == 0.0 {
+                        continue;
+                    }
                     jones_weighted_sum += Jones::<f64>::from(jones) * weight as f64;
                     weight_sum += weight as f64;
                 }
 
                 if weight_sum > 0.0 {
                     *jones_to = Jones::from(jones_weighted_sum / weight_sum);
+                } else {
+                    *jones_to = Jones::zero();
                 }
             }
         }
     }
 }
 
-fn weights_average(weight_tfb: ArrayView3<f32>, mut weight_avg_tfb: ArrayViewMut3<f32>) {
+fn weights_average(
+    weight_tfb: ArrayView3<f32>,
+    mut weight_avg_tfb: ArrayViewMut3<f32>,
+    avg_freq: usize,
+) {
     let from_dims = weight_tfb.dim();
     let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
     let avg_time = div_ceil(
         weight_tfb.len_of(time_axis),
         weight_avg_tfb.len_of(time_axis),
-    );
-    let avg_freq = div_ceil(
-        weight_tfb.len_of(freq_axis),
-        weight_avg_tfb.len_of(freq_axis),
     );
 
     let to_dims = weight_avg_tfb.dim();
@@ -1054,10 +1063,19 @@ fn iono_fit_inner<const XX_ONLY: bool>(
                                     model[0] + model[3]
                                 };
 
-                                let model_i_re = model_i.re as f64;
-                                let mr = model_i_re * (residual_i.im as f64 - model_i.im as f64);
-                                let mm = model_i_re * model_i_re;
-                                let s_vm = model_i_re * residual_i.re as f64;
+                                // Complex least squares also works for resolved sources,
+                                // whose source-centred visibility need not be purely real.
+                                // Im(conj(M) D) estimates phase; Re(conj(M) D) estimates gain.
+                                let model_i =
+                                    Complex::new(f64::from(model_i.re), f64::from(model_i.im));
+                                let residual_i = Complex::new(
+                                    f64::from(residual_i.re),
+                                    f64::from(residual_i.im),
+                                );
+                                let cross = model_i.conj() * residual_i;
+                                let mr = cross.im;
+                                let mm = model_i.norm_sqr();
+                                let s_vm = cross.re;
                                 let s_mm = mm;
                                 let weight = *weight as f64;
 
@@ -1151,6 +1169,7 @@ fn peel_cpu(
     peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
+    freq_average_factor: usize,
     obs_context: &ObsContext,
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut dyn SkyModeller,
@@ -1307,7 +1326,11 @@ fn peel_cpu(
     let mut weights_lo: Array3<f32> = Array3::zeros(resid_lo_src_tfb.dim());
 
     // The low-res weights only need to be populated once.
-    weights_average(vis_weights_tfb.view(), weights_lo.view_mut());
+    weights_average(
+        vis_weights_tfb.view(),
+        weights_lo.view_mut(),
+        freq_average_factor,
+    );
 
     for pass in 0..num_passes {
         for (((source_name, source), iono_consts), source_pos) in source_list
@@ -1423,6 +1446,7 @@ fn peel_cpu(
                 resid_hi_src_tfb.view(),
                 resid_lo_src_tfb.view_mut(),
                 vis_weights_tfb.view(),
+                freq_average_factor,
             );
 
             multi_progress_bar.suspend(|| trace!("{:?}: alpha/beta loop", start.elapsed()));
@@ -1445,6 +1469,7 @@ fn peel_cpu(
                     model_hi_src_iono_tfb.view(),
                     model_lo_src_iono_tfb.view_mut(),
                     vis_weights_tfb.view(),
+                    freq_average_factor,
                 );
 
                 let iono_fits = iono_fit(
@@ -1459,6 +1484,10 @@ fn peel_cpu(
                 let da = iono_fits[0];
                 let db = iono_fits[1];
                 let dg = iono_fits[2] / iono_fits[3];
+                if !da.is_finite() || !db.is_finite() || !dg.is_finite() {
+                    warn!("Cannot fit {source_name} in timeblock {}: insufficient weighted data or singular geometry; keeping previous constants", timeblock.index);
+                    break;
+                }
                 iono_consts.alpha += convergence * da;
                 iono_consts.beta += convergence * db;
                 iono_consts.gain *= 1. + convergence * (dg - 1.);
@@ -1594,7 +1623,7 @@ impl approx::AbsDiffEq for UV {
 #[allow(clippy::too_many_arguments)]
 fn read_thread(
     input_vis_params: &InputVisParams,
-    tx_data: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    tx_data: Sender<InputTimestep>,
     error: &AtomicCell<bool>,
     read_progress: &ProgressBar,
 ) -> Result<(), VisReadError> {
@@ -1609,11 +1638,17 @@ fn read_thread(
         ));
         let mut vis_weights_fb = Array2::zeros(vis_data_fb.raw_dim());
 
+        let mut autos = input_vis_params.using_autos.then(|| {
+            (
+                Array2::zeros((input_vis_params.spw.chanblocks.len(), num_unflagged_tiles)),
+                Array2::zeros((input_vis_params.spw.chanblocks.len(), num_unflagged_tiles)),
+            )
+        });
         input_vis_params.read_timeblock(
             timeblock,
             vis_data_fb.view_mut(),
             vis_weights_fb.view_mut(),
-            None,
+            autos.as_mut().map(|(d, w)| (d.view_mut(), w.view_mut())),
             error,
         )?;
 
@@ -1622,7 +1657,12 @@ fn read_thread(
             return Ok(());
         }
 
-        match tx_data.send((vis_data_fb, vis_weights_fb, timeblock.median)) {
+        match tx_data.send((
+            vis_data_fb,
+            vis_weights_fb,
+            input_vis_params.get_timeblock_model_timestamp(timeblock),
+            autos,
+        )) {
             Ok(()) => (),
             // If we can't send the message, it's because the
             // channel has been closed on the other side. That
@@ -1654,7 +1694,7 @@ fn subtract_thread(
     apply_precession: bool,
     num_sources_to_iono_subtract: usize,
     preserve_non_iono_sources: bool,
-    rx_data: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    rx_data: Receiver<InputTimestep>,
     tx_residual: Sender<ResidualTimestep>,
     error: &AtomicCell<bool>,
     model_progress: &ProgressBar,
@@ -1750,7 +1790,7 @@ fn subtract_thread(
         None
     };
 
-    for (mut vis_data_fb, vis_weights_fb, timestamp) in rx_data.iter() {
+    for (mut vis_data_fb, vis_weights_fb, timestamp, autos) in rx_data.iter() {
         // Should we continue?
         if error.load() {
             return Ok(());
@@ -1841,6 +1881,7 @@ fn subtract_thread(
             vis_weights_fb,
             restore_model_fb,
             timestamp,
+            autos,
         }) {
             Ok(()) => (),
             Err(_) => return Ok(()),
@@ -1854,11 +1895,15 @@ fn subtract_thread(
     Ok(())
 }
 
+type AutoVis = (Array2<Jones<f32>>, Array2<f32>);
+type InputTimestep = (Array2<Jones<f32>>, Array2<f32>, Epoch, Option<AutoVis>);
+
 struct ResidualTimestep {
     vis_residual_fb: Array2<Jones<f32>>,
     vis_weights_fb: Array2<f32>,
     restore_model_fb: Option<Array2<Jones<f32>>>,
     timestamp: Epoch,
+    autos: Option<AutoVis>,
 }
 
 // type for passing full residuals from joiner thread
@@ -1867,6 +1912,7 @@ type FullResidual<'a> = (
     Array3<f32>,
     Option<Array3<Jones<f32>>>,
     &'a Timeblock,
+    Vec<Option<AutoVis>>,
 );
 
 /// reshapes residuals for peel.
@@ -1896,6 +1942,7 @@ fn joiner_thread<'a>(
         let mut restore_model_tfb =
             restore_non_iono_sources.then(|| Array3::zeros(vis_residual_tfb.raw_dim()));
 
+        let mut autos = Vec::with_capacity(timeblock.timestamps.len());
         let timestamps = &timeblock.timestamps;
         trace!("[joiner] timestamps={timestamps:?}");
 
@@ -1905,12 +1952,17 @@ fn joiner_thread<'a>(
         )
         .enumerate()
         {
-            let ResidualTimestep {
+            let Ok(ResidualTimestep {
                 vis_residual_fb,
                 mut vis_weights_fb,
                 restore_model_fb,
                 timestamp,
-            } = rx_residual.recv().unwrap();
+                autos: timestep_autos,
+            }) = rx_residual.recv()
+            else {
+                return;
+            };
+            autos.push(timestep_autos);
             assert!(timestamps.contains(&timestamp));
 
             // Should we continue?
@@ -1947,6 +1999,7 @@ fn joiner_thread<'a>(
             vis_weights_tfb,
             restore_model_tfb,
             timeblock,
+            autos,
         )) {
             Ok(()) => (),
             Err(_) => return,
@@ -1971,6 +2024,7 @@ fn peel_thread(
     tile_baseline_flags: &TileBaselineFlags,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
+    freq_average_factor: usize,
     apply_precession: bool,
     output_vis_params: Option<&OutputVisParams>,
     rx_full_residual: Receiver<FullResidual>,
@@ -1983,7 +2037,7 @@ fn peel_thread(
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
 
-    for (i, (mut vis_residual_tfb, vis_weights_tfb, restore_model_tfb, timeblock)) in
+    for (i, (mut vis_residual_tfb, vis_weights_tfb, restore_model_tfb, timeblock, autos)) in
         rx_full_residual.iter().enumerate()
     {
         // Should we continue?
@@ -2034,6 +2088,7 @@ fn peel_thread(
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
+                    freq_average_factor,
                     obs_context,
                     tile_baseline_flags,
                     &mut high_res_modeller,
@@ -2067,6 +2122,7 @@ fn peel_thread(
                     peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
+                    freq_average_factor,
                     obs_context,
                     tile_baseline_flags,
                     &mut high_res_modeller,
@@ -2105,10 +2161,11 @@ fn peel_thread(
             vis_residual_tfb += &restore_model_tfb;
         }
 
-        for ((cross_data_fb, cross_weights_fb), timestamp) in vis_residual_tfb
+        for (((cross_data_fb, cross_weights_fb), timestamp), autos) in vis_residual_tfb
             .outer_iter()
             .zip(vis_weights_tfb.outer_iter())
             .zip(timeblock.timestamps.iter())
+            .zip(autos)
         {
             // TODO: Puke.
             let cross_data_fb = cross_data_fb.to_shared();
@@ -2117,7 +2174,7 @@ fn peel_thread(
                 match tx_write.send(VisTimestep {
                     cross_data_fb,
                     cross_weights_fb,
-                    autos: None,
+                    autos: autos.map(|(d, w)| (d.into_shared(), w.into_shared())),
                     timestamp: *timestamp,
                     output_timestamp: *timestamp,
                 }) {

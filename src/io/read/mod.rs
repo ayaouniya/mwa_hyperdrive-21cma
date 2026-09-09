@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn infer_mwa_coarse_chan_info_rejects_non_mwa_grid() {
-        let fine_chan_freqs = [121_887_207.03125, 121_911_621.09375, 121_936_035.15625];
-        assert!(infer_mwa_coarse_chan_info(&fine_chan_freqs, 24_414.0625).is_none());
+        let fine_chan_freqs = [121_887_207.031_25, 121_911_621.093_75, 121_936_035.156_25];
+        assert!(infer_mwa_coarse_chan_info(&fine_chan_freqs, 24_414.062_5).is_none());
     }
 }

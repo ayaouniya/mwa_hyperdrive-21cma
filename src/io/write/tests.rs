@@ -222,7 +222,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         );
 
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -425,7 +425,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -811,7 +811,7 @@ fn test_vis_output_time_averaging() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)));
-        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
+        assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),

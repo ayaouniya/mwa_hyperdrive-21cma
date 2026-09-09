@@ -289,6 +289,9 @@ pub(crate) fn write_vis(
                 } else {
                     ms.initialize(&vis_ctx, &marlu_obs_ctx, Some(&history))?;
                 }
+                if processing_telescope == Telescope::Cma21 {
+                    ms.set_telescope_name("21CMA")?;
+                }
                 Box::new(ms)
             }
         };

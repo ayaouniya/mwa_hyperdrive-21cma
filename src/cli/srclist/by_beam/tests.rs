@@ -27,6 +27,8 @@ fn test_srclist_by_beam() {
         input_type: None,
         output_type: None,
         metafits: Some(PathBuf::from("test_files/1090008640/1090008640.metafits")),
+        data: None,
+        telescope: None,
         array_position: None,
         lst_rad: None,
         phase_centre: None,

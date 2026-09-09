@@ -1,4 +1,5 @@
 *.json binary
+docs/21cma/*.json text diff merge
 *.yaml binary
 *.fits binary
 *.metafits binary

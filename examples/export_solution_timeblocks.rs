@@ -73,12 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|v| v.get(chanblock))
                     .map(|f| *f / 1e6)
                     .unwrap_or(f64::NAN);
-                let amp = scalar_amp_xx(j)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(String::new);
-                let phase = phase_xx_deg(j)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(String::new);
+                let amp = scalar_amp_xx(j).map(|v| v.to_string()).unwrap_or_default();
+                let phase = phase_xx_deg(j).map(|v| v.to_string()).unwrap_or_default();
                 let is_nan = if j.any_nan() { 1 } else { 0 };
                 writeln!(
                     f,

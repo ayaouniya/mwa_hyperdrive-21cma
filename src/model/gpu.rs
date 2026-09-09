@@ -1140,6 +1140,7 @@ impl<'a> SkyModellerGpu<'a> {
     ///
     /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
     /// in \[radians\].
+    #[cfg(test)]
     pub(super) unsafe fn model_points(
         &self,
         lst_rad: f64,
@@ -1166,6 +1167,7 @@ impl<'a> SkyModellerGpu<'a> {
     ///
     /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
     /// in \[radians\].
+    #[cfg(test)]
     pub(super) unsafe fn model_gaussians(
         &self,
         lst_rad: f64,
@@ -1192,6 +1194,7 @@ impl<'a> SkyModellerGpu<'a> {
     ///
     /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
     /// in \[radians\].
+    #[cfg(test)]
     pub(super) unsafe fn model_shapelets(
         &self,
         lst_rad: f64,

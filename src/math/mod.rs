@@ -42,6 +42,17 @@ pub(crate) fn average_epoch<I: IntoIterator<Item = Epoch>>(es: I) -> Epoch {
     Epoch::from_gpst_seconds(average).round(10.milliseconds())
 }
 
+/// Average real timestamps without the legacy 10 ms rounding. Summing offsets
+/// from the first epoch avoids losing sub-second precision at large GPS times.
+pub(crate) fn average_epoch_unrounded<I: IntoIterator<Item = Epoch>>(es: I) -> Epoch {
+    let mut epochs = es.into_iter();
+    let first = epochs.next().expect("timestamps cannot be empty");
+    let (offset_sum, count) = epochs.fold((hifitime::Duration::default(), 1), |(sum, n), t| {
+        (sum + (t - first), n + 1)
+    });
+    first + offset_sum / count as f64
+}
+
 pub(crate) fn div_ceil(a: usize, b: usize) -> usize {
     a.div_ceil(b)
 }

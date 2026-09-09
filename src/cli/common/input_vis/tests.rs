@@ -721,7 +721,7 @@ fn output_timeblocks_preserve_irregular_21cma_timestamps() {
     }
     .parse(
         Duration::from_seconds(3.5),
-        24_414.0625,
+        24_414.062_5,
         &timestamps,
         Telescope::Cma21,
         false,
@@ -754,7 +754,7 @@ fn output_timeblocks_reject_21cma_uvfits_outputs() {
     }
     .parse(
         Duration::from_seconds(3.5),
-        24_414.0625,
+        24_414.062_5,
         &timestamps,
         Telescope::Cma21,
         false,

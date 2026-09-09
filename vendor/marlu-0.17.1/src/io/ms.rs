@@ -1145,6 +1145,16 @@ impl MeasurementSetWriter {
         }
     }
 
+    /// Set the telescope name on an initialized MeasurementSet. Generic
+    /// non-MWA callers can override the historical MWA default explicitly.
+    pub fn set_telescope_name(&self, name: &str) -> Result<(), MeasurementSetWriteError> {
+        let mut observation = Table::open(self.path.join("OBSERVATION"), TableOpenMode::ReadWrite)?;
+        for row in 0..observation.n_rows() {
+            observation.put_cell("TELESCOPE_NAME", row, &name.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Create an MWA measurement set, with all tables (except the main visibility table)
     /// prefilled with metadata from a [`mwalib::CorrelatorContext`]
     ///

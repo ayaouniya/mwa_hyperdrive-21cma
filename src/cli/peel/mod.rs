@@ -17,13 +17,14 @@ use serde::{Deserialize, Serialize};
 use super::common::{BeamArgs, InputVisArgs, ModellingArgs, SkyModelWithVetoArgs, ARG_FILE_HELP};
 use crate::{
     averaging::{
-        channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
-        timesteps_to_timeblocks, unflag_spw, AverageFactorError,
+        channels_to_chanblocks, chunked_timestamps_to_timeblocks, parse_freq_average_factor,
+        parse_time_average_factor, timesteps_to_timeblocks, unflag_spw, AverageFactorError,
     },
     cli::{
         common::{display_warnings, InfoPrinter, OutputVisArgs},
         Warn,
     },
+    context::Telescope,
     io::write::{VisOutputType, VIS_OUTPUT_EXTENSIONS},
     math::div_ceil,
     params::{ModellingParams, PeelLoopParams, PeelParams, PeelWeightParams},
@@ -349,12 +350,18 @@ impl PeelArgs {
                 f
             }
         };
-        let iono_timeblocks = timesteps_to_timeblocks(
-            &input_vis_params.get_output_timeblock_timestamps(),
-            input_vis_params.time_res,
-            iono_time_average_factor,
-            None,
-        );
+        let timestamps = input_vis_params.get_output_timeblock_timestamps();
+        let iono_timeblocks = match input_vis_params.processing_telescope {
+            Telescope::Standard => timesteps_to_timeblocks(
+                &timestamps,
+                input_vis_params.time_res,
+                iono_time_average_factor,
+                None,
+            ),
+            Telescope::Cma21 => {
+                chunked_timestamps_to_timeblocks(&timestamps, iono_time_average_factor)
+            }
+        };
 
         // Set up the chanblocks.
         let iono_freq_average_factor = {
@@ -417,7 +424,16 @@ impl PeelArgs {
             1,
             "There should only be 1 low-res SPW, because there's only 1 high-res SPW"
         );
-        let low_res_spw = low_res_spws.swap_remove(0);
+        let mut low_res_spw = low_res_spws.swap_remove(0);
+        // A final partial block uses the centre of the channels actually fitted.
+        for (block, channels) in low_res_spw.chanblocks.iter_mut().zip(
+            input_vis_params
+                .spw
+                .chanblocks
+                .chunks(iono_freq_average_factor.get()),
+        ) {
+            block.freq = channels.iter().map(|c| c.freq).sum::<f64>() / channels.len() as f64;
+        }
         let n_low_freqs = low_res_spw.get_all_freqs().len();
         let n_input_freqs = input_vis_params.spw.get_all_freqs().len();
         assert_eq!(
@@ -429,6 +445,10 @@ impl PeelArgs {
             n_input_freqs,
         );
 
+        let default_output = match input_vis_params.processing_telescope {
+            Telescope::Standard => DEFAULT_OUTPUT_PEEL_FILENAME,
+            Telescope::Cma21 => "hyperdrive_peeled.ms",
+        };
         // Parse vis and iono const outputs.
         let (vis_outputs, iono_outputs) = {
             let mut vis_outputs = vec![];
@@ -436,7 +456,7 @@ impl PeelArgs {
             match outputs {
                 // Defaults.
                 None => {
-                    let pb = PathBuf::from(DEFAULT_OUTPUT_PEEL_FILENAME);
+                    let pb = PathBuf::from(default_output);
                     pb.extension()
                         .and_then(|os_str| os_str.to_str())
                         .and_then(|s| VisOutputType::from_str(s).ok())
@@ -488,7 +508,7 @@ impl PeelArgs {
                 &input_vis_params.get_output_timeblock_timestamps(),
                 input_vis_params.processing_telescope,
                 output_smallest_contiguous_band,
-                DEFAULT_OUTPUT_PEEL_FILENAME,
+                default_output,
                 Some("peeled"),
             )?;
             Some(params)
@@ -507,11 +527,7 @@ impl PeelArgs {
 
         // Set baseline weights from UVW cuts. Use a lambda from the centroid
         // frequency if UVW cutoffs are specified as wavelengths.
-        let freq_centroid = obs_context
-            .fine_chan_freqs
-            .iter()
-            .map(|&u| u as f64)
-            .sum::<f64>()
+        let freq_centroid = obs_context.fine_chan_freqs.iter().copied().sum::<f64>()
             / obs_context.fine_chan_freqs.len() as f64;
         let lambda = marlu::constants::VEL_C / freq_centroid;
         let uvw_min_metres = {

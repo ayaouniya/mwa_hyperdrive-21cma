@@ -6,6 +6,13 @@ This fork contains an explicit 21CMA processing route on top of
 The goal of the route is to make 21CMA measurement sets usable without
 silently changing the legacy MWA default behaviour.
 
+## Non-calibration functionality
+
+For MS-based simulation, subtraction, CPU/CUDA ionospheric peeling, beam-based
+source selection, reproducible checks and remaining limitations, see
+[21CMA non-calibration guide](NON_CALIBRATION.md) and
+[2026-09-09 validation](VALIDATION_20260909.md).
+
 ## Status
 
 The main non-beam parts are in place and have been regression-tested:
@@ -65,8 +72,9 @@ coarse-channel metadata.
 
 Older fork outputs may advertise four correlations even though only XX was
 measured. With `--telescope 21cma`, these files are read as XX and the other
-products are masked before and after calibration. Newly written MS and UVFITS
-products carry true single-XX metadata.
+products are masked before and after calibration. The explicit 21CMA route
+writes MS with true single-XX metadata and `TELESCOPE_NAME=21CMA`; it rejects
+UVFITS output because that route does not preserve irregular timestamps.
 
 ### Irregular timestamps
 
@@ -126,7 +134,10 @@ hyperdrive solutions-apply \
 python scripts/21cma_ms_preflight.py /path/to/21cma.ms
 ```
 
-## Validation summary
+## Earlier validation summary
+
+The following describes the earlier calibration-focused validation. Current
+non-calibration results are linked above.
 
 This branch passed:
 

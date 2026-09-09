@@ -320,7 +320,6 @@ impl RawDataReader {
         let fine_chan_freqs = mwalib_context
             .get_fine_chan_freqs_hz_array(&coarse_chan_span.collect::<Vec<_>>())
             .into_iter()
-            .map(|f| f as f64)
             .collect();
         let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 

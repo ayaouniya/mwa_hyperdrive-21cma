@@ -268,6 +268,7 @@ impl From<VisSimulateArgsError> for HyperdriveError {
         let s = e.to_string();
         match e {
             VisSimulateArgsError::NoMetafits
+            | VisSimulateArgsError::TemplateOptions(_)
             | VisSimulateArgsError::MetafitsDoesntExist(_)
             | VisSimulateArgsError::RaInvalid
             | VisSimulateArgsError::DecInvalid

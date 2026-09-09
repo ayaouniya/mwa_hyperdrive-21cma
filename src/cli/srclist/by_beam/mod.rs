@@ -21,8 +21,8 @@ use marlu::{LatLngHeight, RADec};
 use crate::{
     beam::Delays,
     cli::common::{
-        display_warnings, BeamArgs, Warn, ARRAY_POSITION_HELP, SOURCE_LIST_INPUT_TYPE_HELP,
-        SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
+        display_warnings, BeamArgs, InputVisArgs, Warn, ARRAY_POSITION_HELP,
+        SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
     },
     constants::{DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD},
     metafits::get_dipole_delays,
@@ -60,6 +60,15 @@ pub struct SrclistByBeamArgs {
     #[arg(short = 'm', long, help_heading = "METADATA")]
     metafits: Option<PathBuf>,
 
+    /// MeasurementSet supplying the array, phase centre, frequency grid and
+    /// first observation timestamp for source selection, including 21CMA.
+    #[arg(long, conflicts_with = "metafits", help_heading = "METADATA")]
+    data: Option<String>,
+
+    /// Telescope route for --data: standard, mwa, or 21cma.
+    #[arg(long, requires = "data", help_heading = "METADATA")]
+    telescope: Option<String>,
+
     #[arg(
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "METADATA",
         num_args(3),
@@ -73,7 +82,7 @@ pub struct SrclistByBeamArgs {
         long = "lst",
         help_heading = "METADATA",
         allow_hyphen_values = true,
-        required_unless_present = "metafits"
+        required_unless_present_any = ["metafits", "data"]
     )]
     lst_rad: Option<f64>,
 
@@ -85,7 +94,7 @@ pub struct SrclistByBeamArgs {
         num_args(2),
         allow_hyphen_values = true,
         value_names = ["RA", "DEC"],
-        required_unless_present = "metafits"
+        required_unless_present_any = ["metafits", "data"]
     )]
     phase_centre: Option<Vec<f64>>,
 
@@ -96,7 +105,7 @@ pub struct SrclistByBeamArgs {
         long = "freqs",
         help_heading = "METADATA",
         num_args(1..),
-        required_unless_present = "metafits"
+        required_unless_present_any = ["metafits", "data"]
     )]
     freqs_hz: Option<Vec<f64>>,
 
@@ -148,7 +157,37 @@ pub struct SrclistByBeamArgs {
 
 impl SrclistByBeamArgs {
     /// Run [`by_beam`] with these arguments.
-    pub fn run(self) -> Result<(), HyperdriveError> {
+    pub fn run(mut self) -> Result<(), HyperdriveError> {
+        if let Some(data) = self.data.take() {
+            let input = InputVisArgs {
+                files: Some(vec![data]),
+                telescope: self.telescope.take(),
+                array_position: self.array_position.clone(),
+                ..Default::default()
+            }
+            .parse("Source selection")?;
+            let obs = input.get_obs_context();
+            let precession = marlu::precession::precess_time(
+                obs.array_position.longitude_rad,
+                obs.array_position.latitude_rad,
+                obs.phase_centre,
+                input.get_primary_model_timestamp(),
+                input.dut1,
+            );
+            self.lst_rad.get_or_insert(precession.lmst_j2000);
+            self.phase_centre.get_or_insert_with(|| {
+                vec![
+                    obs.phase_centre.ra.to_degrees(),
+                    obs.phase_centre.dec.to_degrees(),
+                ]
+            });
+            self.freqs_hz.get_or_insert_with(|| obs.get_veto_freqs());
+            self.array_position = Some(vec![
+                obs.array_position.longitude_rad.to_degrees(),
+                precession.array_latitude_j2000.to_degrees(),
+                obs.array_position.height_metres,
+            ]);
+        }
         by_beam(
             &self.input_source_list,
             self.output_source_list.as_deref(),

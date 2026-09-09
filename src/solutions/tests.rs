@@ -315,3 +315,43 @@ fn test_write_and_read_ao_solutions() {
     assert_eq!(disk_average_timestamps.len(), 1);
     assert_abs_diff_eq!(disk_average_timestamps[0].to_gpst_seconds(), 1090008650.0);
 }
+
+#[test]
+fn ao_to_fits_preserves_solutions_without_inventing_timeblocks() {
+    for num_timeblocks in [1, 3] {
+        let start = Epoch::from_gpst_seconds(1090008640.125);
+        let end = Epoch::from_gpst_seconds(1090008650.625);
+        let mut sols = CalibrationSolutions {
+            di_jones: Array3::from_shape_fn((num_timeblocks, 2, 4), |(t, a, f)| {
+                Jones::identity() * (1 + t * 8 + a * 4 + f) as f64
+            }),
+            start_timestamps: Some(vec1![start]),
+            end_timestamps: Some(vec1![end]),
+            ..Default::default()
+        };
+        sols.di_jones.slice_mut(s![.., .., 3]).fill(Jones::nan());
+        let binary = tempfile::NamedTempFile::new().unwrap();
+        let fits = tempfile::NamedTempFile::new().unwrap();
+        ao::write(&sols, binary.path()).unwrap();
+        let from_binary = ao::read(binary.path()).unwrap();
+        hyperdrive::write(&from_binary, fits.path()).unwrap();
+        let roundtrip = hyperdrive::read(fits.path()).unwrap();
+        assert_eq!(roundtrip.di_jones.dim(), sols.di_jones.dim());
+        for (expected, actual) in sols.di_jones.iter().zip(roundtrip.di_jones.iter()) {
+            if expected.any_nan() {
+                assert!(actual.any_nan());
+            } else {
+                assert_abs_diff_eq!(expected, actual);
+            }
+        }
+        assert_eq!(roundtrip.flagged_chanblocks, vec![3]);
+        if num_timeblocks == 1 {
+            assert_eq!(roundtrip.start_timestamps, Some(vec1![start]));
+            assert_eq!(roundtrip.end_timestamps, Some(vec1![end]));
+        } else {
+            assert!(roundtrip.start_timestamps.is_none());
+            assert!(roundtrip.end_timestamps.is_none());
+            assert!(roundtrip.average_timestamps.is_none());
+        }
+    }
+}

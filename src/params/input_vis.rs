@@ -84,7 +84,12 @@ impl InputVisParams {
     }
 
     pub(crate) fn get_timeblock_average_timestamp(&self, timeblock: &Timeblock) -> Epoch {
-        average_epoch(timeblock.timestamps.iter().copied())
+        match self.processing_telescope {
+            Telescope::Standard => average_epoch(timeblock.timestamps.iter().copied()),
+            Telescope::Cma21 => {
+                crate::math::average_epoch_unrounded(timeblock.timestamps.iter().copied())
+            }
+        }
     }
 
     pub(crate) fn get_timeblock_model_timestamp(&self, timeblock: &Timeblock) -> Epoch {

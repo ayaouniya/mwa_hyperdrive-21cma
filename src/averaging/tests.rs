@@ -387,10 +387,10 @@ fn test_no_channels_to_chanblocks() {
 
 #[test]
 fn test_channels_to_chanblocks_with_fractional_hz_frequencies() {
-    let all_channel_freqs = [121_887_207.03125, 121_911_621.09375, 121_936_035.15625];
+    let all_channel_freqs = [121_887_207.031_25, 121_911_621.093_75, 121_936_035.156_25];
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
-        24_414.0625,
+        24_414.062_5,
         NonZeroUsize::new(1).unwrap(),
         &HashSet::new(),
     );
@@ -400,7 +400,7 @@ fn test_channels_to_chanblocks_with_fractional_hz_frequencies() {
     assert_abs_diff_eq!(spws[0].chanblocks[0].freq, all_channel_freqs[0]);
     assert_abs_diff_eq!(spws[0].chanblocks[1].freq, all_channel_freqs[1]);
     assert_abs_diff_eq!(spws[0].chanblocks[2].freq, all_channel_freqs[2]);
-    assert_abs_diff_eq!(spws[0].freq_res, 24_414.0625);
+    assert_abs_diff_eq!(spws[0].freq_res, 24_414.062_5);
     assert_abs_diff_eq!(spws[0].first_freq, all_channel_freqs[0]);
 }
 

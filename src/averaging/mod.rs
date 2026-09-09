@@ -19,7 +19,7 @@ use ndarray::prelude::*;
 use vec1::Vec1;
 
 use crate::{
-    math::average_epoch,
+    math::average_epoch_unrounded,
     unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
 };
 
@@ -282,7 +282,7 @@ pub(crate) fn chunked_selected_timesteps_to_timeblocks(
         timeblocks.push(Timeblock {
             index: i_timeblock,
             range: start..end,
-            median: average_epoch(timeblock_timestamps.iter().copied()),
+            median: average_epoch_unrounded(timeblock_timestamps.iter().copied()),
             timestamps: timeblock_timestamps,
             timesteps: timeblock_timesteps,
         });

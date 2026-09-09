@@ -1,0 +1,344 @@
+{
+  "cpu": {
+    "binary": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/build-cuda/release/hyperdrive",
+    "binary_sha256": "d7463396e22ab466c89446ba1957c53d2a0953950aa17a3a02b69c35eef5070b",
+    "input_ms": "/data/zfy/21cma_hyperdrive_project/imaging_runs/b07_structure_mitigation_20260720/vis/b07_cal_pilot_t0700_0799_tavg2_favg2_ch001_120.ms",
+    "source_list": "/home/zhaofyastro/21cma_hyperdrive_project/models/21cma_ncp_hybrid_v1_3c61lotssgaus_j235522lotss_core5_100mjy_v1.yaml",
+    "source_sha256": "af17fd1216cd80807896dd58c50771a6757a08a98a2e9f79e279f30def2c6bd2",
+    "beam_file": "/data/zfy/21cma_hyperdrive_project/beam_feko/processed/cma21_feko_formed_50_200mhz_nativefreq_halfsky_0p25_steering_shapeonly_centernorm_v1.h5",
+    "cpu": true,
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      10,
+      11,
+      12
+    ],
+    "num_rows": 5460,
+    "num_channels": 120,
+    "freq_range_hz": [
+      138134765.625,
+      149755859.375
+    ],
+    "subtraction_relative_closure_rms": 1.9626504819892415e-08,
+    "injected_gain": 1.1,
+    "injected_peel_relative_residual_rms": 1.8430968836110993e-06,
+    "preserve_non_iono_absolute_closure_rms": 9.567331163305887e-08,
+    "real_input_rms_jy": 20.306878892830778,
+    "real_subtract_rms_jy": 16.331575328273946,
+    "real_peel_rms_jy": 16.30479803391978,
+    "iono_timeblocks": 3,
+    "injected_fit": {
+      "3C390.3": {
+        "alphas": [
+          8.375904838521272e-12,
+          -2.628982373611196e-12,
+          2.6777655293665807e-12
+        ],
+        "betas": [
+          -4.252762896941384e-12,
+          1.2597529934283647e-12,
+          -1.2998117607450532e-12
+        ],
+        "gains": [
+          1.1000000001892536,
+          1.099999999560169,
+          1.1000000008771373
+        ],
+        "weighted_catalogue_pos_j2000": {
+          "ra": 280.5384829979084,
+          "dec": 79.77286981689576
+        },
+        "centroid_timestamps_gps_seconds": [
+          1058045595.87,
+          1058045795.8966666,
+          1058045910.43
+        ]
+      }
+    },
+    "solutions": null,
+    "commands": [
+      {
+        "label": "convert",
+        "exit_code": 0,
+        "elapsed_seconds": 0.9656852249754593
+      },
+      {
+        "label": "simulate",
+        "exit_code": 0,
+        "elapsed_seconds": 7.17454665096011
+      },
+      {
+        "label": "subtract",
+        "exit_code": 0,
+        "elapsed_seconds": 7.026173627004027
+      },
+      {
+        "label": "peel_real",
+        "exit_code": 0,
+        "elapsed_seconds": 8.227138706017286
+      },
+      {
+        "label": "simulate_bright",
+        "exit_code": 0,
+        "elapsed_seconds": 6.974555546010379
+      },
+      {
+        "label": "peel_injected",
+        "exit_code": 0,
+        "elapsed_seconds": 6.823874188994523
+      },
+      {
+        "label": "peel_preserve",
+        "exit_code": 0,
+        "elapsed_seconds": 6.973822099040262
+      },
+      {
+        "label": "convert_average",
+        "exit_code": 0,
+        "elapsed_seconds": 0.8655446710181423
+      },
+      {
+        "label": "srclist_by_beam",
+        "exit_code": 0,
+        "elapsed_seconds": 5.6221393700107
+      },
+      {
+        "label": "srclist_verify",
+        "exit_code": 0,
+        "elapsed_seconds": 0.31468511099228635
+      },
+      {
+        "label": "srclist_convert",
+        "exit_code": 0,
+        "elapsed_seconds": 0.3146057720296085
+      },
+      {
+        "label": "srclist_verify_converted",
+        "exit_code": 0,
+        "elapsed_seconds": 0.26446773594943807
+      },
+      {
+        "label": "beam",
+        "exit_code": 0,
+        "elapsed_seconds": 4.821252362977248
+      },
+      {
+        "label": "srclist_shift",
+        "exit_code": 0,
+        "elapsed_seconds": 0.31448951200582087
+      }
+    ],
+    "passed": true,
+    "scope": "Engineering closure and metadata checks; no claim of scientific image improvement.",
+    "log_directory": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/cpu_final"
+  },
+  "cuda": {
+    "binary": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/build-cuda/release/hyperdrive",
+    "binary_sha256": "d7463396e22ab466c89446ba1957c53d2a0953950aa17a3a02b69c35eef5070b",
+    "input_ms": "/data/zfy/21cma_hyperdrive_project/imaging_runs/b07_structure_mitigation_20260720/vis/b07_cal_pilot_t0700_0799_tavg2_favg2_ch001_120.ms",
+    "source_list": "/home/zhaofyastro/21cma_hyperdrive_project/models/21cma_ncp_hybrid_v1_3c61lotssgaus_j235522lotss_core5_100mjy_v1.yaml",
+    "source_sha256": "af17fd1216cd80807896dd58c50771a6757a08a98a2e9f79e279f30def2c6bd2",
+    "beam_file": "/data/zfy/21cma_hyperdrive_project/beam_feko/processed/cma21_feko_formed_50_200mhz_nativefreq_halfsky_0p25_steering_shapeonly_centernorm_v1.h5",
+    "cpu": false,
+    "timesteps": [
+      0,
+      1,
+      2,
+      3,
+      10,
+      11,
+      12
+    ],
+    "num_rows": 5460,
+    "num_channels": 120,
+    "freq_range_hz": [
+      138134765.625,
+      149755859.375
+    ],
+    "subtraction_relative_closure_rms": 1.9657967266549892e-08,
+    "injected_gain": 1.1,
+    "injected_peel_relative_residual_rms": 1.836212462512398e-06,
+    "preserve_non_iono_absolute_closure_rms": 2.2200558658009283e-09,
+    "real_input_rms_jy": 20.306878892830778,
+    "real_subtract_rms_jy": 16.331575322402752,
+    "real_peel_rms_jy": 16.304798027031605,
+    "iono_timeblocks": 3,
+    "injected_fit": {
+      "3C390.3": {
+        "alphas": [
+          1.5920568403696916e-11,
+          -6.143022948364662e-12,
+          2.7146038660274043e-12
+        ],
+        "betas": [
+          -8.305985459885144e-12,
+          2.863352988135678e-12,
+          -1.4812662459271816e-12
+        ],
+        "gains": [
+          1.0999999474598172,
+          1.1000000250268271,
+          1.1000000446231395
+        ],
+        "weighted_catalogue_pos_j2000": {
+          "ra": 280.5384829979084,
+          "dec": 79.77286981689576
+        },
+        "centroid_timestamps_gps_seconds": [
+          1058045595.87,
+          1058045795.8966666,
+          1058045910.43
+        ]
+      }
+    },
+    "solutions": "/data/zfy/21cma_hyperdrive_project/tmp_bandtest_125_150_solutions.fits",
+    "commands": [
+      {
+        "label": "convert",
+        "exit_code": 0,
+        "elapsed_seconds": 0.9655626940075308
+      },
+      {
+        "label": "simulate",
+        "exit_code": 0,
+        "elapsed_seconds": 8.226250012987293
+      },
+      {
+        "label": "subtract",
+        "exit_code": 0,
+        "elapsed_seconds": 6.523295837978367
+      },
+      {
+        "label": "peel_real",
+        "exit_code": 0,
+        "elapsed_seconds": 6.523270085977856
+      },
+      {
+        "label": "simulate_bright",
+        "exit_code": 0,
+        "elapsed_seconds": 6.9235001510242
+      },
+      {
+        "label": "peel_injected",
+        "exit_code": 0,
+        "elapsed_seconds": 6.622953210957348
+      },
+      {
+        "label": "peel_preserve",
+        "exit_code": 0,
+        "elapsed_seconds": 6.573274674010463
+      },
+      {
+        "label": "convert_average",
+        "exit_code": 0,
+        "elapsed_seconds": 0.8653741980087943
+      },
+      {
+        "label": "srclist_by_beam",
+        "exit_code": 0,
+        "elapsed_seconds": 5.622110091033392
+      },
+      {
+        "label": "srclist_verify",
+        "exit_code": 0,
+        "elapsed_seconds": 0.2644558739848435
+      },
+      {
+        "label": "srclist_convert",
+        "exit_code": 0,
+        "elapsed_seconds": 0.3145417500054464
+      },
+      {
+        "label": "srclist_verify_converted",
+        "exit_code": 0,
+        "elapsed_seconds": 0.3150672549963929
+      },
+      {
+        "label": "beam",
+        "exit_code": 0,
+        "elapsed_seconds": 4.871204241993837
+      },
+      {
+        "label": "srclist_shift",
+        "exit_code": 0,
+        "elapsed_seconds": 0.26452422398142517
+      },
+      {
+        "label": "solutions_convert",
+        "exit_code": 0,
+        "elapsed_seconds": 0.032026614993810654
+      },
+      {
+        "label": "solutions_convert_back",
+        "exit_code": 0,
+        "elapsed_seconds": 0.032120211981236935
+      },
+      {
+        "label": "solutions_check_payload",
+        "exit_code": 0,
+        "elapsed_seconds": 0.032061792036984116
+      },
+      {
+        "label": "solutions_plot",
+        "exit_code": 0,
+        "elapsed_seconds": 0.41477308497997
+      }
+    ],
+    "passed": true,
+    "scope": "Engineering closure and metadata checks; no claim of scientific image improvement.",
+    "log_directory": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/cuda_final"
+  },
+  "cpu_cuda_relative_rms": {
+    "model": 4.9182508140594194e-08,
+    "subtract": 4.079714764581453e-08,
+    "peel_real": 1.246577936866578e-07
+  },
+  "beam_sha256": "1a54257b2920bdd9a5bd7d6d764a1a7c190f113b6df01e981c1ed2c4c9f9697d",
+  "build": {
+    "rustc": "1.87.0",
+    "cargo_features": [
+      "default (plotting)",
+      "cuda"
+    ],
+    "gpu": "NVIDIA A100 80GB PCIe, CUDA_VISIBLE_DEVICES=1",
+    "cuda_compute_capability": "80",
+    "source_base_commit": "5633c54",
+    "source_state": "Working tree containing the implementation committed with this report; binary compiled before commit."
+  },
+  "tests": {
+    "cpu_lib": {
+      "passed": 316,
+      "failed": 0,
+      "seconds": 98.38,
+      "command": "cargo test --locked --release --no-default-features --lib -- --test-threads=1",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/cpu_lib.log"
+    },
+    "cuda_lib": {
+      "passed": 373,
+      "failed": 0,
+      "seconds": 100.13,
+      "command": "cargo test --locked --release --features cuda --lib -- --test-threads=1",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/cuda_lib.log"
+    },
+    "integration": {
+      "passed": 24,
+      "failed": 0,
+      "seconds": 12.38,
+      "command": "cargo test --locked --release --test integration_tests -- --test-threads=1",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/integration.log"
+    },
+    "clippy_cpu_lib": {
+      "passed": true,
+      "command": "cargo clippy --locked --no-default-features --lib -- -D warnings",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/clippy_cpu_lib.log"
+    },
+    "clippy_tracked_targets": {
+      "passed": true,
+      "command": "cargo clippy --locked --lib --bin hyperdrive --examples --test integration_tests --bench bench -- -D warnings",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/clippy_tracked_targets.log"
+    }
+  }
+}

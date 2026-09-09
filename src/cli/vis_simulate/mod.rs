@@ -26,13 +26,13 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use super::common::{
-    display_warnings, BeamArgs, ModellingArgs, OutputVisArgs, SkyModelWithVetoArgs, ARG_FILE_HELP,
-    ARRAY_POSITION_HELP,
+    display_warnings, BeamArgs, InputVisArgs, ModellingArgs, OutputVisArgs, SkyModelWithVetoArgs,
+    ARG_FILE_HELP, ARRAY_POSITION_HELP,
 };
 use crate::{
     beam::Delays,
     cli::common::InfoPrinter,
-    context::Telescope,
+    context::{Polarisations, Telescope},
     io::write::VIS_OUTPUT_EXTENSIONS,
     math::TileBaselineFlags,
     metafits::{get_dipole_delays, get_dipole_gains},
@@ -69,6 +69,19 @@ pub(super) struct VisSimulateCliArgs {
     /// Path to the metafits file.
     #[clap(short, long, help_heading = "INPUT FILES")]
     pub(super) metafits: Option<PathBuf>,
+
+    /// MeasurementSet whose array, phase centre, channels and timestamps are
+    /// used for simulation. Visibility values and sample weights are not copied.
+    #[clap(long, conflicts_with = "metafits", help_heading = "INPUT FILES")]
+    pub(super) data: Option<String>,
+
+    /// Telescope route for --data: standard, mwa, or 21cma (single XX).
+    #[clap(long, requires = "data", help_heading = "INPUT FILES")]
+    pub(super) telescope: Option<String>,
+
+    /// Select these timestep indices from --data; default: all, including flagged times.
+    #[clap(long, requires = "data", num_args(1..), help_heading = "INPUT FILES")]
+    pub(super) timesteps: Option<Vec<usize>>,
 
     /// Use this value as the DUT1 [seconds].
     #[clap(long, help_heading = "INPUT DATA")]
@@ -249,6 +262,15 @@ impl VisSimulateArgs {
 
     fn parse(self) -> Result<VisSimulateParams, HyperdriveError> {
         debug!("{:#?}", self);
+        if self.simulate_args.data.is_some() {
+            return self.parse_from_ms();
+        }
+        if self.simulate_args.telescope.is_some() || self.simulate_args.timesteps.is_some() {
+            return Err(VisSimulateArgsError::TemplateOptions(
+                "--telescope and --timesteps require --data",
+            )
+            .into());
+        }
 
         // Expose all the struct fields to ensure they're all used.
         let VisSimulateArgs {
@@ -259,6 +281,9 @@ impl VisSimulateArgs {
             simulate_args:
                 VisSimulateCliArgs {
                     metafits,
+                    data: _,
+                    telescope: _,
+                    timesteps: _,
                     dut1,
                     ignore_dut1,
                     ra,
@@ -579,7 +604,10 @@ impl VisSimulateArgs {
 
         Ok(VisSimulateParams {
             source_list,
-            metafits,
+            obsid: Some(metafits.obs_id),
+            mwa_obs_context: Some(marlu::MwaObsContext::from_mwalib(&metafits)),
+            telescope: Telescope::Standard,
+            polarisations: Polarisations::XX_XY_YX_YY,
             output_vis_params,
             phase_centre,
             fine_chan_freqs,
@@ -593,6 +621,114 @@ impl VisSimulateArgs {
             array_position,
             dut1,
             modelling_params,
+        })
+    }
+
+    /// Simulate directly on an MS observation grid without manufacturing MWA metadata.
+    fn parse_from_ms(self) -> Result<VisSimulateParams, HyperdriveError> {
+        let args = self.simulate_args;
+        if args.metafits.is_some()
+            || args.ra.is_some()
+            || args.dec.is_some()
+            || args.num_fine_channels.is_some()
+            || args.freq_res.is_some()
+            || args.middle_freq.is_some()
+            || args.num_timesteps.is_some()
+            || args.time_res.is_some()
+            || args.time_offset.is_some()
+        {
+            return Err(VisSimulateArgsError::TemplateOptions(
+                "--data supplies the phase centre, channels and timestamps; do not combine it with --metafits, --ra, --dec, --num-fine-channels, --freq-res, --middle-freq, --num-timesteps, --time-res or --time-offset. Use --timesteps and --output-model-*-average to select or average the template grid."
+            ).into());
+        }
+        let path = args.data.expect("checked before dispatch");
+        if Path::new(&path).extension().and_then(|s| s.to_str()) != Some("ms") {
+            return Err(VisSimulateArgsError::TemplateOptions(
+                "--data must be a MeasurementSet (.ms)",
+            )
+            .into());
+        }
+        let input = InputVisArgs {
+            files: Some(vec![path]),
+            telescope: args.telescope,
+            use_all_timesteps: args.timesteps.is_none(),
+            timesteps: args.timesteps,
+            array_position: args.array_position,
+            dut1: args.dut1,
+            ignore_dut1: args.ignore_dut1,
+            // Simulations use the full spectral grid, regardless of sample flags.
+            ignore_input_data_fine_channel_flags: true,
+            ..Default::default()
+        }
+        .parse("Simulation template")?;
+        let obs = input.get_obs_context();
+        let timestamps = input.get_output_timeblock_timestamps();
+        let beam = self.beam_args.parse(
+            obs.get_total_num_tiles(),
+            obs.dipole_delays.clone(),
+            obs.dipole_gains.clone(),
+            Some(obs.input_data_type),
+        )?;
+        let modelling_params = self.modelling_args.parse();
+        let precession = precess_time(
+            obs.array_position.longitude_rad,
+            obs.array_position.latitude_rad,
+            obs.phase_centre,
+            *timestamps.first(),
+            input.dut1,
+        );
+        let (lst, lat) = if modelling_params.apply_precession {
+            (precession.lmst_j2000, precession.array_latitude_j2000)
+        } else {
+            (precession.lmst, obs.array_position.latitude_rad)
+        };
+        let source_list =
+            self.srclist_args
+                .parse(obs.phase_centre, lst, lat, &obs.get_veto_freqs(), &*beam)?;
+        let source_list = source_list.filter(
+            args.filter_points,
+            args.filter_gaussians,
+            args.filter_shapelets,
+        );
+        let output_vis_params = OutputVisArgs {
+            outputs: args.output_model_files,
+            output_vis_time_average: args.output_model_time_average,
+            output_vis_freq_average: args.output_model_freq_average,
+            output_autos: args.output_autos,
+        }
+        .parse(
+            input.time_res,
+            input.spw.freq_res,
+            &timestamps,
+            input.processing_telescope,
+            false,
+            if input.processing_telescope == Telescope::Cma21 {
+                "hyp_model.ms"
+            } else {
+                DEFAULT_OUTPUT_VIS_FILENAME
+            },
+            Some("simulated"),
+        )?;
+        display_warnings();
+        Ok(VisSimulateParams {
+            source_list,
+            obsid: obs.obsid,
+            mwa_obs_context: input.vis_reader.get_marlu_mwa_info(),
+            telescope: input.processing_telescope,
+            polarisations: obs.polarisations,
+            output_vis_params,
+            phase_centre: obs.phase_centre,
+            fine_chan_freqs: input.spw.get_all_freqs(),
+            freq_res_hz: input.spw.freq_res,
+            tile_xyzs: obs.tile_xyzs.to_vec(),
+            tile_names: obs.tile_names.to_vec(),
+            timestamps,
+            time_res: input.time_res,
+            beam,
+            array_position: obs.array_position,
+            dut1: input.dut1,
+            modelling_params,
+            tile_baseline_flags: input.tile_baseline_flags,
         })
     }
 
@@ -613,8 +749,11 @@ impl VisSimulateArgs {
 
 #[derive(Error, Debug)]
 pub(super) enum VisSimulateArgsError {
-    #[error("No metafits file was supplied")]
+    #[error("Supply a metafits file (--metafits), or a MeasurementSet template (--data)")]
     NoMetafits,
+
+    #[error("{0}")]
+    TemplateOptions(&'static str),
 
     #[error("Metafits file '{0}' doesn't exist")]
     MetafitsDoesntExist(Box<Path>),
@@ -645,6 +784,9 @@ impl VisSimulateCliArgs {
     fn merge(self, other: Self) -> Self {
         Self {
             metafits: self.metafits.or(other.metafits),
+            data: self.data.or(other.data),
+            telescope: self.telescope.or(other.telescope),
+            timesteps: self.timesteps.or(other.timesteps),
             dut1: self.dut1.or(other.dut1),
             ignore_dut1: self.ignore_dut1 || other.ignore_dut1,
             ra: self.ra.or(other.ra),

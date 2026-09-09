@@ -132,10 +132,11 @@ __global__ void average_kernel(const JonesF32 *high_res_vis, const float *high_r
 
         for (int i_time = 0; i_time < num_timesteps; i_time++)
         {
-            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++)
+            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor && i_freq_chunk < num_freqs; i_freq_chunk++)
             {
                 const int step = (i_time * num_freqs + i_freq_chunk) * num_baselines + i_bl;
                 const double weight = high_res_weights[step];
+                if (weight <= 0.0) continue;
                 const JonesF32 vis_single = high_res_vis[step];
                 const JonesF64 vis_double = JonesF64{
                     .j00_re = vis_single.j00_re,
@@ -467,8 +468,10 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
         const double model_i_re = XX_ONLY ? (double)model->j00_re : (double)model->j00_re + (double)model->j11_re;
         const double model_i_im = XX_ONLY ? (double)model->j00_im : (double)model->j00_im + (double)model->j11_im;
 
-        const double mr = model_i_re * (residual_i_im - model_i_im);
-        const double mm = model_i_re * model_i_re;
+        // Complex least squares: retain both quadratures for resolved sources.
+        const double mr = model_i_re * residual_i_im - model_i_im * residual_i_re;
+        const double mm = model_i_re * model_i_re + model_i_im * model_i_im;
+        const double vm = model_i_re * residual_i_re + model_i_im * residual_i_im;
 
         iono_fits[step] = JonesF64{
             // Rather than multiplying by λ here, do it later, when all these
@@ -479,7 +482,7 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
             .j01_re = weight * mm * v * v,                 // a_vv
             .j01_im = weight * mr * u,                     // A_u
             .j10_re = weight * mr * v,                     // A_v
-            .j10_im = weight * model_i_re * residual_i_re, // s_vm
+            .j10_im = weight * vm,                          // s_vm
             .j11_re = weight * mm,                         // s_mm
             .j11_im = 1.0,
         };

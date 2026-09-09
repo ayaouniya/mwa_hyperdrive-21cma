@@ -296,3 +296,6 @@ fn display_build_info() {
     info!("         with compiler {}", RUSTC_VERSION);
     info!("");
 }
+
+#[cfg(test)]
+mod noncal_21cma_tests;

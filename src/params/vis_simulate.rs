@@ -19,7 +19,6 @@ use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
 };
-use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
 use scopeguard::defer_on_unwind;
 use thiserror::Error;
@@ -42,8 +41,10 @@ pub(crate) struct VisSimulateParams {
     /// Sky-model source list.
     pub(crate) source_list: SourceList,
 
-    /// mwalib metafits context
-    pub(crate) metafits: MetafitsContext,
+    pub(crate) obsid: Option<u32>,
+    pub(crate) mwa_obs_context: Option<MwaObsContext>,
+    pub(crate) telescope: Telescope,
+    pub(crate) polarisations: Polarisations,
 
     /// The output visibility files.
     pub(crate) output_vis_params: OutputVisParams,
@@ -88,7 +89,10 @@ impl VisSimulateParams {
     pub(crate) fn run(&self) -> Result<(), VisSimulateError> {
         let VisSimulateParams {
             source_list,
-            metafits,
+            obsid,
+            mwa_obs_context,
+            telescope,
+            polarisations,
             output_vis_params:
                 OutputVisParams {
                     output_files,
@@ -154,10 +158,17 @@ impl VisSimulateParams {
 
                     let weight_factor = (freq_res_hz / FREQ_WEIGHT_FACTOR)
                         * (time_res.to_seconds() / TIME_WEIGHT_FACTOR);
+                    let unflagged_tile_xyzs: Vec<_> = tile_xyzs
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| !tile_baseline_flags.flagged_tiles.contains(i))
+                        .map(|(_, xyz)| *xyz)
+                        .collect();
                     model_thread(
                         &**beam,
                         source_list,
-                        tile_xyzs,
+                        *polarisations,
+                        &unflagged_tile_xyzs,
                         tile_baseline_flags,
                         timestamps,
                         fine_chan_freqs,
@@ -206,7 +217,7 @@ impl VisSimulateParams {
                             None,
                             tile_xyzs,
                             tile_names,
-                            Some(metafits.obs_id),
+                            *obsid,
                             output_timeblocks,
                             *time_res,
                             *dut1,
@@ -214,10 +225,10 @@ impl VisSimulateParams {
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,
                             *output_freq_average_factor,
-                            Some(&MwaObsContext::from_mwalib(metafits)),
+                            mwa_obs_context.as_ref(),
                             *write_smallest_contiguous_band,
-                            Telescope::Standard,
-                            Polarisations::XX_XY_YX_YY,
+                            *telescope,
+                            *polarisations,
                             rx_model,
                             &error,
                             Some(write_progress),
@@ -243,6 +254,7 @@ impl VisSimulateParams {
 fn model_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
+    polarisations: Polarisations,
     unflagged_tile_xyzs: &[XyzGeodetic],
     tile_baseline_flags: &TileBaselineFlags,
     timestamps: &[Epoch],
@@ -259,7 +271,7 @@ fn model_thread(
     let modeller = model::new_sky_modeller(
         beam,
         source_list,
-        Polarisations::XX_XY_YX_YY,
+        polarisations,
         unflagged_tile_xyzs,
         fine_chan_freqs,
         &tile_baseline_flags.flagged_tiles,

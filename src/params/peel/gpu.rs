@@ -32,6 +32,7 @@ pub(crate) fn peel_gpu(
     peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
+    freq_average_factor: usize,
     obs_context: &ObsContext,
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut SkyModellerGpu,
@@ -74,10 +75,8 @@ pub(crate) fn peel_gpu(
     );
 
     let num_low_res_chans = low_res_lambdas_m.len();
-    assert!(
-        num_high_res_chans % num_low_res_chans == 0,
-        "TODO: averaging can't deal with non-integer ratios. channels high {} low {}",
-        num_high_res_chans,
+    assert_eq!(
+        num_high_res_chans.div_ceil(freq_average_factor),
         num_low_res_chans
     );
 
@@ -253,9 +252,13 @@ pub(crate) fn peel_gpu(
     let mut vis_weights_low_res_fb: Array3<f32> = Array3::zeros(vis_residual_low_res_fb.raw_dim());
 
     // The low-res weights only need to be populated once.
-    weights_average(vis_weights_tfb.view(), vis_weights_low_res_fb.view_mut());
+    weights_average(
+        vis_weights_tfb.view(),
+        vis_weights_low_res_fb.view_mut(),
+        freq_average_factor,
+    );
 
-    let freq_average_factor: i32 = (all_fine_chan_lambdas_m.len() / num_low_res_chans)
+    let freq_average_factor: i32 = freq_average_factor
         .try_into()
         .expect("smaller than i32::MAX");
 
@@ -362,6 +365,15 @@ pub(crate) fn peel_gpu(
                 });
             d_uvws.push(DevicePointer::copy_to_device(&gpu_uvws)?);
         }
+        let observation_uvws: Vec<_> = high_res_uvws
+            .iter()
+            .map(|uvw| gpu::UVW {
+                u: uvw.u as GpuFloat,
+                v: uvw.v as GpuFloat,
+                w: uvw.w as GpuFloat,
+            })
+            .collect();
+        let d_observation_uvws = DevicePointer::copy_to_device(&observation_uvws)?;
         let mut d_beam_jones = DevicePointer::default();
 
         for pass in 0..num_passes {
@@ -440,9 +452,10 @@ pub(crate) fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: rotate", start.elapsed());
 
-                // there's a bug in the modeller where it ignores --no-precession
-                // high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-                high_res_modeller.update_with_a_source(source, source_pos)?;
+                // Model in the original observation frame, then phase-rotate.
+                // Remodelling in the source frame changes the Gaussian envelope
+                // (which uses the observation UV axes) and biases the fitted gain.
+                high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
                 // Clear the old memory before reusing the buffer.
                 d_high_res_model_tfb.clear();
                 for (i_time, (lmst, latitude)) in lmsts.iter().zip(latitudes.iter()).enumerate() {
@@ -450,18 +463,26 @@ pub(crate) fn peel_gpu(
                     d_high_res_model_tfb.ptr = d_high_res_model_tfb
                         .ptr
                         .add(i_time * num_cross_baselines * all_fine_chan_lambdas_m.len());
-                    let original_uvw_ptr = d_uvws_to.ptr;
-                    d_uvws_to.ptr = d_uvws_to.ptr.add(i_time * num_cross_baselines);
-                    high_res_modeller.model_timestep_with(
+                    let model_result = high_res_modeller.model_timestep_with(
                         *lmst,
                         *latitude,
-                        &d_uvws_to,
+                        &d_uvws[i_time],
                         &mut d_beam_jones,
                         &mut d_high_res_model_tfb,
-                    )?;
+                    );
                     d_high_res_model_tfb.ptr = original_model_ptr;
-                    d_uvws_to.ptr = original_uvw_ptr;
+                    model_result?;
                 }
+                gpu_kernel_call!(
+                    gpu::rotate,
+                    d_high_res_model_tfb.get_mut().cast(),
+                    num_timesteps_i32,
+                    num_cross_baselines_i32,
+                    num_high_res_chans_i32,
+                    d_observation_uvws.get(),
+                    d_uvws_to.get(),
+                    d_lambdas.get()
+                )?;
                 pb_trace!("{:?}: high res model", start.elapsed());
 
                 // d_high_res_resid_tfb = residuals@src.
@@ -572,9 +593,16 @@ pub(crate) fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: iono_loop", start.elapsed());
 
-                iono_consts.alpha = old_iono_consts.alpha + gpu_iono_consts.alpha;
-                iono_consts.beta = old_iono_consts.beta + gpu_iono_consts.beta;
-                iono_consts.gain = old_iono_consts.gain * gpu_iono_consts.gain;
+                if gpu_iono_consts.alpha.is_finite()
+                    && gpu_iono_consts.beta.is_finite()
+                    && gpu_iono_consts.gain.is_finite()
+                {
+                    iono_consts.alpha = old_iono_consts.alpha + gpu_iono_consts.alpha;
+                    iono_consts.beta = old_iono_consts.beta + gpu_iono_consts.beta;
+                    iono_consts.gain = old_iono_consts.gain * gpu_iono_consts.gain;
+                } else {
+                    warn!("Cannot fit {source_name} in timeblock {}: insufficient weighted data or singular geometry; keeping previous constants", timeblock.index);
+                }
 
                 #[rustfmt::skip]
                 let issues = format!(

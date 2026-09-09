@@ -362,11 +362,7 @@ impl DiCalArgs {
 
         // Set baseline weights from UVW cuts. Use a lambda from the centroid
         // frequency if UVW cutoffs are specified as wavelengths.
-        let freq_centroid = obs_context
-            .fine_chan_freqs
-            .iter()
-            .map(|&u| u as f64)
-            .sum::<f64>()
+        let freq_centroid = obs_context.fine_chan_freqs.iter().copied().sum::<f64>()
             / obs_context.fine_chan_freqs.len() as f64;
         let lambda = marlu::constants::VEL_C / freq_centroid;
         let (uvw_min, uvw_min_metres) = {
