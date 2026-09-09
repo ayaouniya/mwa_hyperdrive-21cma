@@ -47,7 +47,7 @@ CPU/CUDA 模型、直接减源、真实 peeling 的相对差异 RMS 分别为 `4
 
 ## 自动回归覆盖
 
-最终结果：CPU 库测试 **316/316**，CUDA 库测试 **373/373**，CLI 集成测试 **24/24**；CPU 库及主程序/示例/集成测试/benchmark 的严格 Clippy 检查通过，`cargo fmt --all --check` 与 `git diff --check` 通过。测试命令和日志路径记录在机器可读报告的 `tests` 中。
+最终结果：CPU 库测试 **316/316**，CUDA 库测试 **373/373**，CLI 集成测试 **24/24**；从干净的已提交 checkout 运行 `cargo clippy --locked --all-targets -- -D warnings` 通过，`cargo fmt --all --check` 与 `git diff --check` 通过。测试命令和日志路径记录在机器可读报告的 `tests` 中。
 
 测试使用 `MWA_BEAM_FILE=/home/zhaofyastro/MWA/mwa_full_embedded_element_pattern.h5`、`RAYON_NUM_THREADS=4`、`--test-threads=1`；CUDA 构建加 `HYPERDRIVE_CUDA_COMPUTE=80 HYPERBEAM_CUDA_COMPUTE=80 CUDA_PATH=/usr/local/cuda CUDA_VISIBLE_DEVICES=1`。主要覆盖：
 

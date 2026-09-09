@@ -339,6 +339,12 @@
       "passed": true,
       "command": "cargo clippy --locked --lib --bin hyperdrive --examples --test integration_tests --bench bench -- -D warnings",
       "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/clippy_tracked_targets.log"
+    },
+    "clippy_clean_checkout": {
+      "passed": true,
+      "command": "cargo clippy --locked --all-targets -- -D warnings",
+      "source_commit": "e2e19e4a8a67b25ad6b5362cac53c2991a441b3c",
+      "log": "/data/zfy/21cma_hyperdrive_project/noncal_validation_20260909/logs/clippy_clean_checkout.log"
     }
   }
 }
