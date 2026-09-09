@@ -726,6 +726,7 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     }
 
     CHECK_GPU_ERROR(gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost));
+    CHECK_GPU_ERROR(gpuFree(d_iono_consts));
     return NULL;
 }
 
