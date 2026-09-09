@@ -604,27 +604,7 @@ pub(crate) fn peel_gpu(
                     warn!("Cannot fit {source_name} in timeblock {}: insufficient weighted data or singular geometry; keeping previous constants", timeblock.index);
                 }
 
-                #[rustfmt::skip]
-                let issues = format!(
-                    "{}{}{}",
-                    if iono_consts.alpha.abs() > 1e-3 {
-                        if iono_consts.alpha > 0.0 { "A" } else { "a" }
-                    } else {
-                        ""
-                    },
-                    if iono_consts.beta.abs() > 1e-3 {
-                        if iono_consts.beta > 0.0 { "B" } else { "b" }
-                    } else {
-                        ""
-                    },
-                    if iono_consts.gain < 0.0 {
-                        "g"
-                    } else if iono_consts.gain > 1.5 {
-                        "G"
-                    } else {
-                        ""
-                    },
-                );
+                let issues = iono_consts.fit_issue().unwrap_or("");
                 let message = format!(
                     "t{:3} pass {:2} s{i_source:6}|{source_name:16} @ ra {:+7.2} d {:+7.2} | a {:+8.6} b {:+8.6} g {:+3.2} | da {:+8.6} db {:+8.6} dg {:+3.2} | {}",
                     timeblock.index,
@@ -645,6 +625,7 @@ pub(crate) fn peel_gpu(
                     pass_beta_mag += (iono_consts.beta - old_iono_consts.beta).abs();
                     pass_gain_mag += iono_consts.gain - old_iono_consts.gain;
                 } else {
+                    pb_warn!("Rejecting fit for {source_name} in timeblock {}: {issues}; keeping previous constants {old_iono_consts:?}", timeblock.index);
                     pb_debug!(
                         "[peel_gpu] {} (reverting to a {:+8.6} b {:+8.6} g {:+3.2})",
                         message,

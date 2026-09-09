@@ -69,6 +69,22 @@ impl Default for IonoConsts {
     }
 }
 
+impl IonoConsts {
+    /// Apply the historical GPU fit limits on both processing devices. A
+    /// rejected fit retains the previous pass's constants, not a partial update.
+    fn fit_issue(&self) -> Option<&'static str> {
+        if !self.alpha.is_finite() || !self.beta.is_finite() || !self.gain.is_finite() {
+            Some("non-finite constants")
+        } else if self.alpha.abs() > 1e-3 || self.beta.abs() > 1e-3 {
+            Some("absolute alpha or beta exceeds 1e-3")
+        } else if !(0.0..=1.5).contains(&self.gain) {
+            Some("gain outside 0..=1.5")
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SourceIonoConsts {
     pub(crate) alphas: Vec<f64>,
@@ -1492,10 +1508,20 @@ fn peel_cpu(
                 iono_consts.beta += convergence * db;
                 iono_consts.gain *= 1. + convergence * (dg - 1.);
 
+                // Match the GPU loop's early exit for a negative gain.
+                if iono_consts.gain < 0.0 {
+                    break;
+                }
+
                 // if the offset is small, we've converged.
                 if (da.powf(2.) + db.powf(2.) + (dg - 1.).powf(2.)).sqrt() < 1e-8 {
                     break;
                 }
+            }
+
+            if let Some(issue) = iono_consts.fit_issue() {
+                warn!("Rejecting fit for {source_name} in timeblock {}: {issue}; keeping previous constants {old_iono_consts:?}", timeblock.index);
+                *iono_consts = old_iono_consts;
             }
 
             // multi_progress_bar.suspend(|| trace!("{:?}: high res model", start.elapsed()));

@@ -1701,6 +1701,13 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
                 beta: 0.0001,
                 gain: 0.9,
             },
+            // A fit outside the accepted gain range must keep the previous
+            // constants on CPU and GPU, leaving the uncorrected residual.
+            IonoConsts {
+                alpha: 0.,
+                beta: 0.,
+                gain: 1.8,
+            },
         ] {
             log::info!("Testing with iono consts {iono_consts:?}");
             apply_iono_tfb(
@@ -1774,6 +1781,18 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
                     .unwrap()
                 }
             };
+
+            if iono_consts.gain > 1.5 {
+                assert_eq!(all_iono_consts[0].alpha, 0.);
+                assert_eq!(all_iono_consts[0].beta, 0.);
+                assert_eq!(all_iono_consts[0].gain, 1.);
+                for (actual, model) in vis_residual_obs_tfb.iter().zip(vis_model_obs_tfb.iter()) {
+                    for (a, m) in actual.iter().zip(model.iter()) {
+                        assert_abs_diff_eq!(*a, *m * 0.8, epsilon = 2e-6);
+                    }
+                }
+                continue;
+            }
 
             // peel should perfectly remove the iono rotate model vis
             let mut norm_sum = 0.;
