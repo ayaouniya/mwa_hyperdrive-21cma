@@ -139,7 +139,8 @@ pub(crate) struct ObsContext {
     /// data would give misleading results.
     pub(crate) all_timesteps: Vec1<usize>,
 
-    /// The timestep indices of the input data that aren't totally flagged.
+    /// The default timestep selection after excluding known flagged edges.
+    /// MS readers retain interior gaps; the per-visibility flags still apply.
     ///
     /// This is allowed to be empty.
     pub(crate) unflagged_timesteps: Vec<usize>,

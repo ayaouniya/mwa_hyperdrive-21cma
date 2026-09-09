@@ -5,6 +5,7 @@
 use std::{fs::File, io::BufReader, path::PathBuf};
 
 use approx::assert_abs_diff_eq;
+use clap::Parser;
 
 use super::SrclistByBeamArgs;
 use crate::{
@@ -60,4 +61,49 @@ fn test_srclist_by_beam() {
     for i in 0..n {
         assert_abs_diff_eq!(sl[i], new_sl[i]);
     }
+}
+
+#[test]
+fn collapse_keeps_brightness_order_after_removing_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let sky = dir.path().join("sky.json");
+    let output = dir.path().join("collapsed.json");
+    let mut sources = serde_json::Map::new();
+    for (name, ra, flux) in [("bright", 0., 10.), ("middle", 10., 5.), ("faint", 20., 1.)] {
+        sources.insert(
+            name.into(),
+            serde_json::json!([{
+                "ra": ra, "dec": 88., "comp_type": "point",
+                "flux_type": {"power_law": {"si": 0., "fd": {"freq": 150e6, "i": flux}}}
+            }]),
+        );
+    }
+    std::fs::write(&sky, serde_json::to_vec(&sources).unwrap()).unwrap();
+    SrclistByBeamArgs::parse_from([
+        "srclist-by-beam",
+        sky.to_str().unwrap(),
+        output.to_str().unwrap(),
+        "--lst",
+        "0",
+        "--phase-centre",
+        "0",
+        "90",
+        "--freqs",
+        "150000000",
+        "--array-position",
+        "86.7",
+        "42.9",
+        "2500",
+        "--beam-type",
+        "none",
+        "--collapse-into-single-source",
+        "--number",
+        "1",
+    ])
+    .run()
+    .unwrap();
+    let (collapsed, _) = read_source_list_file(&output, None).unwrap();
+    let components = &collapsed["bright"].components;
+    assert_eq!(components.len(), 2);
+    assert_abs_diff_eq!(components[1].radec.ra.to_degrees(), 10., epsilon = 1e-10);
 }

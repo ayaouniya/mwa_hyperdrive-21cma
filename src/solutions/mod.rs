@@ -218,71 +218,76 @@ impl CalibrationSolutions {
             return self.di_jones.slice(s![0, .., ..]);
         }
 
-        // If the number of timeblocks is different to the length of each type
-        // of timestamp, we're dealing with a dodgy solutions file.
-        let dodgy = num_timeblocks > 1
-            && match (
-                &self.start_timestamps,
-                &self.end_timestamps,
-                &self.average_timestamps,
-            ) {
-                (Some(s), Some(e), Some(a)) => {
-                    num_timeblocks != s.len()
-                        && num_timeblocks != e.len()
-                        && num_timeblocks != a.len()
-                }
-                _ => true,
-            };
-
-        if !dodgy {
-            // Find the timeblock that bounds the timestamp. This check should
-            // be redundant with what is above, but hey, I'm avoiding unwraps.
-            if let (Some(s), Some(e)) = (&self.start_timestamps, &self.end_timestamps) {
-                for (i_timeblock, (&start, &end)) in s.iter().zip(e.iter()).enumerate() {
-                    if timestamp >= start && timestamp <= end {
-                        debug!(
-                            "Using solutions timeblock {i_timeblock} for timestamp {}",
-                            timestamp.to_gpst_seconds()
-                        );
-                        return self.di_jones.slice(s![i_timeblock, .., ..]);
-                    }
-                }
+        // Only per-block metadata can index the Jones time axis. AO binaries
+        // may instead contain one overall start/end/average for many blocks.
+        let bounds = self
+            .start_timestamps
+            .as_ref()
+            .zip(self.end_timestamps.as_ref())
+            .filter(|(s, e)| s.len() == num_timeblocks && e.len() == num_timeblocks);
+        if let Some((starts, ends)) = bounds {
+            if let Some(index) = starts
+                .iter()
+                .zip(ends.iter())
+                .position(|(&start, &end)| timestamp >= start && timestamp <= end)
+            {
+                return self.di_jones.slice(s![index, .., ..]);
             }
-        } else if let Some(a) = &self.average_timestamps {
-            // Try using averages.
-            let mut smallest_diff = (f64::INFINITY, 0);
-            for (i_timeblock, &average) in a.iter().enumerate() {
-                let diff = (average - timestamp).to_seconds().abs();
-                if diff < smallest_diff.0 {
-                    smallest_diff = (diff, i_timeblock);
-                }
-            }
-            if !smallest_diff.0.is_infinite() {
-                debug!(
-                    "Using solutions timeblock {} for timestamp {}",
-                    smallest_diff.1,
-                    timestamp.to_gpst_seconds()
-                );
-                return self.di_jones.slice(s![smallest_diff.1, .., ..]);
-            }
-
-            // There is at least one average timestamp, but something was wrong
-            // with it to get here. At this point, I also don't trust the start
-            // and end timestamps enough to use them. Assume that timeblocks
-            // divide the number of timesteps evenly.
-            let i_timeblock = (timestamp_fraction * num_timeblocks as f64).floor() as usize;
-            debug!(
-                "Using solutions timeblock {i_timeblock} for timestamp {}",
-                timestamp.to_gpst_seconds()
-            );
-            return self.di_jones.slice(s![i_timeblock, .., ..]);
         }
 
-        // All else has somehow failed; just return the first timeblock.
+        // Gaps and timestamps outside the fitted interval use the nearest
+        // centroid, including when start/end columns are unavailable.
+        if let Some(averages) = self
+            .average_timestamps
+            .as_ref()
+            .filter(|a| a.len() == num_timeblocks)
+        {
+            let index = averages
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    (**a - timestamp)
+                        .to_seconds()
+                        .abs()
+                        .total_cmp(&(**b - timestamp).to_seconds().abs())
+                })
+                .expect("at least one solution timeblock")
+                .0;
+            return self.di_jones.slice(s![index, .., ..]);
+        }
+
+        if let Some((starts, ends)) = bounds {
+            let distance = |start: Epoch, end: Epoch| {
+                if timestamp < start {
+                    (start - timestamp).to_seconds()
+                } else {
+                    (timestamp - end).to_seconds()
+                }
+            };
+            let index = starts
+                .iter()
+                .zip(ends.iter())
+                .enumerate()
+                .min_by(|(_, (sa, ea)), (_, (sb, eb))| {
+                    distance(**sa, **ea).total_cmp(&distance(**sb, **eb))
+                })
+                .expect("at least one solution timeblock")
+                .0;
+            return self.di_jones.slice(s![index, .., ..]);
+        }
+
+        // No usable per-block times: assume equal intervals over the input
+        // observation. Clamp the endpoint so fraction=1 selects the last block.
+        let fraction = if timestamp_fraction.is_finite() {
+            timestamp_fraction.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let index = ((fraction * num_timeblocks as f64).floor() as usize).min(num_timeblocks - 1);
         debug!(
-            "Using solutions timeblock 0 for timestamp {}",
+            "Using solutions timeblock {index} for timestamp {} by observation fraction; per-block times unavailable",
             timestamp.to_gpst_seconds()
         );
-        self.di_jones.slice(s![0, .., ..])
+        self.di_jones.slice(s![index, .., ..])
     }
 }

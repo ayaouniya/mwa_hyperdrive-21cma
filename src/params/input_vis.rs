@@ -468,10 +468,11 @@ impl InputVisParams {
 
         let timestamps = &obs_context.timestamps;
         let span = *timestamps.last() - *timestamps.first();
-        let timestamp_fraction = ((timestamp - *timestamps.first()).to_seconds()
-            / span.to_seconds())
-        // Stop stupid values.
-        .clamp(0.0, 0.99);
+        let timestamp_fraction = if span.to_seconds() > 0.0 {
+            ((timestamp - *timestamps.first()).to_seconds() / span.to_seconds()).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
 
         // Find solutions corresponding to this timestamp.
         let sols = solutions.get_timeblock(timestamp, timestamp_fraction);

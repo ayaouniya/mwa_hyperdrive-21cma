@@ -642,7 +642,11 @@ impl VisSimulateArgs {
             ).into());
         }
         let path = args.data.expect("checked before dispatch");
-        if Path::new(&path).extension().and_then(|s| s.to_str()) != Some("ms") {
+        if !Path::new(&path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ms"))
+        {
             return Err(VisSimulateArgsError::TemplateOptions(
                 "--data must be a MeasurementSet (.ms)",
             )

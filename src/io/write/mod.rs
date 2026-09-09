@@ -42,7 +42,7 @@ use crate::{
 pub(crate) enum VisOutputType {
     #[strum(serialize = "uvfits")]
     Uvfits,
-    #[strum(serialize = "ms")]
+    #[strum(serialize = "ms", ascii_case_insensitive)]
     MeasurementSet,
 }
 

@@ -21,7 +21,6 @@ use vec1::Vec1;
 use crate::{
     averaging::{Chanblock, Timeblock},
     context::Polarisations,
-    math::average_epoch,
     params::DiCalParams,
     solutions::CalibrationSolutions,
     MODEL_DEVICE, PROGRESS_BARS,
@@ -240,7 +239,7 @@ impl IncompleteSolutions<'_> {
             start_timestamps: Some(timeblocks.mapped_ref(|tb| *tb.timestamps.first())),
             end_timestamps: Some(timeblocks.mapped_ref(|tb| *tb.timestamps.last())),
             average_timestamps: Some(
-                timeblocks.mapped_ref(|tb| average_epoch(tb.timestamps.iter().copied())),
+                timeblocks.mapped_ref(|tb| input_vis_params.get_timeblock_average_timestamp(tb)),
             ),
             max_iterations: Some(max_iterations),
             stop_threshold: Some(stop_threshold),

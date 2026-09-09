@@ -355,3 +355,58 @@ fn ao_to_fits_preserves_solutions_without_inventing_timeblocks() {
         }
     }
 }
+
+#[test]
+fn select_solution_blocks_with_partial_or_missing_time_metadata() {
+    let epoch = |t| Epoch::from_gpst_seconds(1_090_008_640.0 + t);
+    let mut sols = CalibrationSolutions {
+        di_jones: Array3::from_shape_fn((3, 1, 1), |(t, _, _)| Jones::identity() * (t + 1) as f64),
+        ..Default::default()
+    };
+    let selected = |sols: &CalibrationSolutions, t, fraction| {
+        sols.get_timeblock(epoch(t), fraction)[[0, 0]][0].re
+    };
+    // No times, or only the overall AO summary: use the documented fraction.
+    for summary in [false, true] {
+        if summary {
+            sols.start_timestamps = Some(vec1![epoch(0.)]);
+            sols.end_timestamps = Some(vec1![epoch(100.)]);
+            sols.average_timestamps = Some(vec1![epoch(50.)]);
+        }
+        for (fraction, expected) in [
+            (0., 1.),
+            (0.5, 2.),
+            (1., 3.),
+            (2., 3.),
+            (-1., 1.),
+            (f64::NAN, 1.),
+        ] {
+            assert_eq!(selected(&sols, 50., fraction), expected);
+        }
+    }
+    // Complete start/end times must work without an average column.
+    sols.start_timestamps = Some(vec1![epoch(0.), epoch(10.), epoch(90.)]);
+    sols.end_timestamps = Some(vec1![epoch(2.), epoch(12.), epoch(100.)]);
+    sols.average_timestamps = None;
+    assert_eq!(selected(&sols, 11., 0.), 2.);
+    assert_eq!(selected(&sols, 99., 0.), 3.);
+    assert_eq!(selected(&sols, 88., 0.), 3.);
+    // In a gap or outside the observation, use a complete set of centroids.
+    sols.average_timestamps = Some(vec1![epoch(1.), epoch(11.), epoch(95.)]);
+    assert_eq!(selected(&sols, 80., 0.), 3.);
+    assert_eq!(selected(&sols, 105., 0.), 3.);
+    sols.start_timestamps = None;
+    sols.end_timestamps = None;
+    assert_eq!(selected(&sols, 11., 0.), 2.);
+}
+
+#[test]
+fn solution_fraction_reaches_last_of_many_blocks() {
+    let sols = CalibrationSolutions {
+        di_jones: Array3::from_shape_fn((200, 1, 1), |(t, _, _)| {
+            Jones::identity() * (t + 1) as f64
+        }),
+        ..Default::default()
+    };
+    assert_eq!(sols.get_timeblock(Epoch::default(), 1.)[[0, 0]][0].re, 200.);
+}

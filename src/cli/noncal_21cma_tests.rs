@@ -343,11 +343,12 @@ fn simulation_rejects_ambiguous_template_parameters() {
 #[serial]
 fn simulation_selects_and_averages_template_times() {
     let dir = tempdir().unwrap();
-    let input = dir.path().join("template.ms");
+    // Production 21CMA input directories also use the uppercase suffix.
+    let input = dir.path().join("template.MS");
     template(&input);
     let sky = dir.path().join("sky.yaml");
     std::fs::write(&sky, "ncp:\n  - ra: 0.0\n    dec: 90.0\n    comp_type: point\n    flux_type:\n      power_law:\n        si: 0.0\n        fd: {freq: 150000000.0, i: 10.0}\n").unwrap();
-    let output = dir.path().join("model.ms");
+    let output = dir.path().join("model.MS");
     VisSimulateArgs::parse_from([
         "vis-simulate",
         "--data",
@@ -389,4 +390,83 @@ fn simulation_selects_and_averages_template_times() {
         assert_abs_diff_eq!(j[0].re, 10., epsilon = 1e-5);
         assert_abs_diff_eq!(j[0].im, 0., epsilon = 1e-5);
     }
+}
+
+#[test]
+fn ms_default_time_range_keeps_data_after_flagged_gaps() {
+    use marlu::rubbl_casatables::{Table, TableOpenMode};
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("flagged.ms");
+    template(&input);
+    {
+        let mut tab = Table::open(&input, TableOpenMode::ReadWrite).unwrap();
+        for timestep in [0, 3, 6] {
+            for row in timestep * 6..(timestep + 1) * 6 {
+                tab.put_cell("FLAG", row, &Array2::from_elem((10, 1), true))
+                    .unwrap();
+            }
+        }
+    }
+    let reader = MsReader::new(input, None, None, None).unwrap();
+    assert_eq!(
+        reader.get_obs_context().unflagged_timesteps,
+        vec![1, 2, 3, 4, 5]
+    );
+}
+
+#[test]
+#[serial]
+fn calibration_preserves_native_centroids_with_reader_averaging() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("calibration.ms");
+    template(&input);
+    let sky = dir.path().join("ncp.json");
+    std::fs::write(
+        &sky,
+        serde_json::json!({"ncp": [{
+            "ra": 0., "dec": 90., "comp_type": "point",
+            "flux_type": {"power_law": {"si": 0., "fd": {"freq": 150e6, "i": 10.}}}
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let output = dir.path().join("solutions.fits");
+    super::di_calibrate::DiCalArgs::parse_from([
+        "di-calibrate",
+        "--data",
+        input.to_str().unwrap(),
+        "--telescope",
+        "21cma",
+        "--source-list",
+        sky.to_str().unwrap(),
+        "--beam-type",
+        "none",
+        "--time-average",
+        "2",
+        "--freq-average",
+        "2",
+        "--timesteps-per-timeblock",
+        "4",
+        "--uvw-min",
+        "0m",
+        "--outputs",
+        output.to_str().unwrap(),
+    ])
+    .run(false)
+    .unwrap();
+    let sols =
+        crate::solutions::CalibrationSolutions::read_solutions_from_ext(&output, None::<&Path>)
+            .unwrap();
+    assert_eq!(sols.di_jones.dim(), (2, 4, 5));
+    let averages = sols.average_timestamps.unwrap();
+    assert_abs_diff_eq!(
+        averages[0].to_gpst_seconds(),
+        1_090_008_645.125,
+        epsilon = 1e-6
+    );
+    assert_abs_diff_eq!(
+        averages[1].to_gpst_seconds(),
+        1_090_008_640. + 131. / 3.,
+        epsilon = 1e-6
+    );
 }
