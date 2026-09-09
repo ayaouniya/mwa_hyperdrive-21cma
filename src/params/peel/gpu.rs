@@ -501,23 +501,8 @@ pub(crate) fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: add_model", start.elapsed());
 
-                // *** UGLY HACK ***
-                // d_high_res_model_rotated = iono@src
                 let mut d_high_res_model_rotated: DevicePointer<Jones<f32>> =
                     DevicePointer::malloc(d_high_res_model_tfb.get_size())?;
-                d_high_res_model_rotated.clear();
-                gpu_kernel_call!(
-                    gpu::add_model,
-                    d_high_res_model_rotated.get_mut().cast(),
-                    d_high_res_model_tfb.get().cast(),
-                    gpu_old_iono_consts,
-                    d_lambdas.get(),
-                    d_uvws_to.get(),
-                    num_timesteps_i32,
-                    num_high_res_chans_i32,
-                    num_cross_baselines_i32,
-                )?;
-                pb_trace!("{:?}: add_model", start.elapsed());
 
                 gpu_kernel_call!(
                     gpu::average,
@@ -530,18 +515,6 @@ pub(crate) fn peel_gpu(
                     freq_average_factor
                 )?;
                 pb_trace!("{:?}: average high res vis", start.elapsed());
-
-                gpu_kernel_call!(
-                    gpu::average,
-                    d_high_res_model_rotated.get().cast(),
-                    d_high_res_weights_tfb.get(),
-                    d_low_res_model_fb.get_mut().cast(),
-                    num_timesteps_i32,
-                    num_cross_baselines_i32,
-                    num_high_res_chans_i32,
-                    freq_average_factor
-                )?;
-                pb_trace!("{:?}: average high res model", start.elapsed());
 
                 gpu_kernel_call!(
                     gpu::xyzs_to_uvws,
@@ -558,51 +531,86 @@ pub(crate) fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: low res xyzs_to_uvws", start.elapsed());
 
-                let mut gpu_iono_consts = gpu::IonoConsts {
-                    alpha: 0.0,
-                    beta: 0.0,
-                    gain: 1.0,
-                };
-                // get size of device ptr
-                let lrblch = (num_cross_baselines_i32 * num_low_res_chans_i32) as f64;
-                pb_trace!("before iono_loop nt{:?} nxbl{:?} nlrch{:?} = lrblch{:?}; lrvfb{:?} lrwfb{:?} lrmfb{:?} lrmrfb{:?}",
-                    num_tiles_i32,
-                    num_cross_baselines_i32,
-                    num_low_res_chans_i32,
-                    lrblch,
-                    d_low_res_resid_fb.get_size() as f64 / lrblch,
-                    d_low_res_weights_fb.get_size() as f64 / lrblch,
-                    d_low_res_model_fb.get_size() as f64 / lrblch,
-                    d_low_res_model_rotated.get_size() as f64 / lrblch,
-                );
-                gpu_kernel_call!(
-                    gpu::iono_loop,
-                    d_low_res_resid_fb.get().cast(),
-                    d_low_res_weights_fb.get(),
-                    d_low_res_model_fb.get().cast(),
-                    d_low_res_model_rotated.get_mut().cast(),
-                    d_iono_fits.get_mut().cast(),
-                    &mut gpu_iono_consts,
-                    num_cross_baselines_i32,
-                    num_low_res_chans_i32,
-                    num_loops as i32,
-                    d_low_res_uvws.get(),
-                    d_low_res_lambdas.get(),
-                    convergence as GpuFloat,
-                    i32::from(iono_xx_only),
-                )?;
-                pb_trace!("{:?}: iono_loop", start.elapsed());
+                // Update the model at every native sample before averaging.
+                // Rotating an already averaged model is only an approximation:
+                // it biases fits across wide time gaps or frequency blocks.
+                for _ in 0..num_loops {
+                    d_high_res_model_rotated.clear();
+                    gpu_kernel_call!(
+                        gpu::add_model,
+                        d_high_res_model_rotated.get_mut().cast(),
+                        d_high_res_model_tfb.get().cast(),
+                        gpu::IonoConsts {
+                            alpha: iono_consts.alpha,
+                            beta: iono_consts.beta,
+                            gain: iono_consts.gain,
+                        },
+                        d_lambdas.get(),
+                        d_uvws_to.get(),
+                        num_timesteps_i32,
+                        num_high_res_chans_i32,
+                        num_cross_baselines_i32,
+                    )?;
+                    gpu_kernel_call!(
+                        gpu::average,
+                        d_high_res_model_rotated.get().cast(),
+                        d_high_res_weights_tfb.get(),
+                        d_low_res_model_fb.get_mut().cast(),
+                        num_timesteps_i32,
+                        num_cross_baselines_i32,
+                        num_high_res_chans_i32,
+                        freq_average_factor
+                    )?;
 
-                if gpu_iono_consts.alpha.is_finite()
-                    && gpu_iono_consts.beta.is_finite()
-                    && gpu_iono_consts.gain.is_finite()
-                {
-                    iono_consts.alpha = old_iono_consts.alpha + gpu_iono_consts.alpha;
-                    iono_consts.beta = old_iono_consts.beta + gpu_iono_consts.beta;
-                    iono_consts.gain = old_iono_consts.gain * gpu_iono_consts.gain;
-                } else {
-                    warn!("Cannot fit {source_name} in timeblock {}: insufficient weighted data or singular geometry; keeping previous constants", timeblock.index);
+                    // Fit one incremental correction to this averaged model.
+                    let mut increment = gpu::IonoConsts {
+                        alpha: 0.0,
+                        beta: 0.0,
+                        gain: 1.0,
+                    };
+                    gpu_kernel_call!(
+                        gpu::iono_loop,
+                        d_low_res_resid_fb.get().cast(),
+                        d_low_res_weights_fb.get(),
+                        d_low_res_model_fb.get().cast(),
+                        d_low_res_model_rotated.get_mut().cast(),
+                        d_iono_fits.get_mut().cast(),
+                        &mut increment,
+                        num_cross_baselines_i32,
+                        num_low_res_chans_i32,
+                        1,
+                        d_low_res_uvws.get(),
+                        d_low_res_lambdas.get(),
+                        convergence as GpuFloat,
+                        i32::from(iono_xx_only),
+                    )?;
+                    if !increment.alpha.is_finite()
+                        || !increment.beta.is_finite()
+                        || !increment.gain.is_finite()
+                    {
+                        pb_warn!("Cannot fit {source_name} in timeblock {}: insufficient weighted data or singular geometry; keeping previous constants", timeblock.index);
+                        break;
+                    }
+                    iono_consts.alpha += increment.alpha;
+                    iono_consts.beta += increment.beta;
+                    iono_consts.gain *= increment.gain;
+                    if iono_consts.gain < 0.0 {
+                        break;
+                    }
+                    // The kernel applies convergence to each increment. Match
+                    // the CPU stopping criterion on the undamped fit update.
+                    if convergence == 0.0
+                        || (increment.alpha.powi(2)
+                            + increment.beta.powi(2)
+                            + (increment.gain - 1.0).powi(2))
+                        .sqrt()
+                            / convergence.abs()
+                            < 1e-8
+                    {
+                        break;
+                    }
                 }
+                pb_trace!("{:?}: iono_loop", start.elapsed());
 
                 let issues = iono_consts.fit_issue().unwrap_or("");
                 let message = format!(

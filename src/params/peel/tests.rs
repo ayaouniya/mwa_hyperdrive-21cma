@@ -1547,8 +1547,20 @@ const CPU_TILE_LIMIT: usize = 80;
 /// Test a peel function with and without precession on a single source
 #[track_caller]
 fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
+    test_peel_single_source_with_span(peel_type, iono_xx_only, None);
+}
+
+#[track_caller]
+fn test_peel_single_source_with_span(
+    peel_type: PeelType,
+    iono_xx_only: bool,
+    span: Option<Duration>,
+) {
     // modify obs_context so that timesteps are closer together
-    let obs_context = get_phase1_obs_context(CPU_TILE_LIMIT);
+    let mut obs_context = get_phase1_obs_context(CPU_TILE_LIMIT);
+    if let Some(span) = span {
+        obs_context.timestamps[1] = obs_context.timestamps[0] + span;
+    }
     // let obs_context = get_simple_obs_context(TILE_SPACING);
 
     let array_pos = obs_context.array_position;
@@ -1614,7 +1626,7 @@ fn test_peel_single_source(peel_type: PeelType, iono_xx_only: bool) {
         range: 0..2,
         timestamps: obs_context.timestamps.clone(),
         timesteps: vec1![0, 1],
-        median: obs_context.timestamps[0],
+        median: obs_context.timestamps[0] + span.unwrap_or_default() / 2.0,
     };
 
     let vis_shape = vis_residual_obs_tfb.dim();
@@ -2836,6 +2848,13 @@ mod gpu_tests {
     #[test]
     fn test_peel_gpu_single_source_xx() {
         test_peel_single_source(PeelType::Gpu, true)
+    }
+
+    #[test]
+    fn test_peel_gpu_wide_time_average() {
+        // Native model rotation and time averaging do not commute. A widely
+        // separated pair must still recover the injected offsets and gain.
+        test_peel_single_source_with_span(PeelType::Gpu, true, Some(Duration::from_seconds(1800.0)))
     }
 
     #[test]
