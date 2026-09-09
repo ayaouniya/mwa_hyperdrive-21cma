@@ -27,6 +27,9 @@ This fork also contains an explicit 21CMA processing route.
 See [docs/21cma/README.md](docs/21cma/README.md) for the route summary and
 usage notes.
 
+The latest [21CMA compatibility audit](docs/21cma/COMPATIBILITY_20260909.md)
+records upstream synchronization, calibration and CPU/CUDA non-calibration checks.
+
 ## Troubleshooting
 
 Run `hyperdrive` again, but this time with the debug build:

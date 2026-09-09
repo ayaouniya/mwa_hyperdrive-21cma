@@ -2919,7 +2919,7 @@ mod gpu_tests {
         let lambdas: Vec<f64> = obs_context
             .fine_chan_freqs
             .iter()
-            .map(|&f| VEL_C / (f as f64))
+            .map(|&f| VEL_C / f)
             .collect();
         #[cfg(feature = "gpu-single")]
         let lambdas: Vec<f32> = obs_context

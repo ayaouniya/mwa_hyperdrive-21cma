@@ -3,6 +3,9 @@
 This fork contains an explicit 21CMA processing route on top of
 `mwa_hyperdrive`.
 
+Latest audit: [2026-09-09 upstream compatibility and production validation](COMPATIBILITY_20260909.md),
+including calibration, CPU/CUDA peeling, the installed executable and reproducible checks.
+
 The goal of the route is to make 21CMA measurement sets usable without
 silently changing the legacy MWA default behaviour.
 
