@@ -29,7 +29,7 @@ lazy_static::lazy_static! {
         format!("Don't apply a beam response when generating a sky model. The default is to use the {} beam.", BeamType::default());
 
     static ref BEAM_FILE_HELP: String =
-        format!("The path to a beam file. For 'fee', this is the HDF5 MWA FEE beam file; if not specified, it must be provided by the MWA_BEAM_FILE environment variable. For 'cma21-feko-cube', this is the FEKO-derived HDF5 beam cube.");
+        "The path to a beam file. For 'fee', this is the HDF5 MWA FEE beam file; if not specified, it must be provided by the MWA_BEAM_FILE environment variable. For 'cma21-feko-cube', this is the FEKO-derived HDF5 beam cube.".to_string();
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
